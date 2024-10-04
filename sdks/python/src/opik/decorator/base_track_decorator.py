@@ -56,6 +56,7 @@ class BaseTrackDecorator(abc.ABC):
             capture_input: Whether to capture the input arguments.
             capture_output: Whether to capture the output result.
             generations_aggregator: Function to aggregate generation results.
+            flush: Whether to flush the client after logging.
 
         Returns:
             Callable: The decorated function(if used without parentheses)
@@ -186,10 +187,8 @@ class BaseTrackDecorator(abc.ABC):
                 self._after_call(
                     output=result,
                     capture_output=capture_output,
+                    flush=flush,
                 )
-                if flush:
-                    opik_ = opik_client.get_client_cached()
-                    opik_.flush()
                 if result is not None:
                     return result
 
@@ -243,10 +242,8 @@ class BaseTrackDecorator(abc.ABC):
                 self._after_call(
                     output=result,
                     capture_output=capture_output,
+                    flush=flush,
                 )
-                if flush:
-                    opik_ = opik_client.get_client_cached()
-                    opik_.flush()
                 if result is not None:
                     return result
 
@@ -396,6 +393,7 @@ class BaseTrackDecorator(abc.ABC):
         capture_output: bool,
         generators_span_to_end: Optional[span.SpanData] = None,
         generators_trace_to_end: Optional[trace.TraceData] = None,
+        flush: bool = False,
     ) -> None:
         try:
             if output is not None:
@@ -426,6 +424,10 @@ class BaseTrackDecorator(abc.ABC):
                 )
 
                 client.trace(**trace_data_to_end.__dict__)
+
+            if flush:
+                client.flush()
+
 
         except Exception as exception:
             LOGGER.error(
