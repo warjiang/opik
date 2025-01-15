@@ -8,7 +8,6 @@ import com.comet.opik.api.error.EntityAlreadyExistsException;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.utils.MustacheVariableExtractor;
 import com.google.inject.ImplementedBy;
-import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.inject.Singleton;
@@ -401,7 +400,7 @@ class PromptServiceImpl implements PromptService {
 
     private EntityAlreadyExistsException newConflict(String alreadyExists) {
         log.info(alreadyExists);
-        return new EntityAlreadyExistsException(new ErrorMessage(409, alreadyExists));
+        return new EntityAlreadyExistsException(alreadyExists);
     }
 
     private EntityAlreadyExistsException newVersionConflict() {

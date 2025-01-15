@@ -5,7 +5,6 @@ import com.comet.opik.api.FeedbackScoreBatchItem;
 import com.comet.opik.api.Span;
 import com.comet.opik.api.TimeInterval;
 import com.comet.opik.api.Trace;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.metrics.MetricType;
 import com.comet.opik.api.metrics.ProjectMetricRequest;
 import com.comet.opik.api.metrics.ProjectMetricResponse;
@@ -29,6 +28,7 @@ import com.comet.opik.podam.PodamFactoryUtils;
 import com.comet.opik.utils.JsonUtils;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.GenericType;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -396,7 +396,8 @@ class ProjectMetricsResourceTest {
 
                 var actualError = response.readEntity(ErrorMessage.class);
 
-                assertThat(actualError).isEqualTo(new ErrorMessage(List.of("Unable to process JSON")));
+                assertThat(actualError)
+                        .isEqualTo(new ErrorMessage(HttpStatus.SC_BAD_REQUEST, "Unable to process JSON"));
             }
         }
 

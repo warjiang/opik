@@ -2,8 +2,8 @@ package com.comet.opik.api.resources.v1.priv;
 
 import com.codahale.metrics.annotation.Timed;
 import com.comet.opik.api.AuthDetailsHolder;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.infrastructure.auth.RequestContext;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;

@@ -1,5 +1,6 @@
 package com.comet.opik.api.error;
 
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 

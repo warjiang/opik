@@ -23,7 +23,6 @@ import com.comet.opik.api.PromptVersion;
 import com.comet.opik.api.ScoreSource;
 import com.comet.opik.api.Span;
 import com.comet.opik.api.Trace;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.filter.ExperimentsComparisonFilter;
 import com.comet.opik.api.filter.FieldType;
 import com.comet.opik.api.filter.Filter;
@@ -56,6 +55,7 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.GenericType;
@@ -1324,7 +1324,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
 
         }
@@ -1365,7 +1365,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(conflictMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(conflictMessage);
             }
         }
     }
@@ -1402,7 +1402,7 @@ class DatasetsResourceTest {
 
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
             assertThat(actualResponse.hasEntity()).isTrue();
-            assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset not found");
+            assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset not found");
         }
 
         @Test
@@ -1445,7 +1445,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset not found");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset not found");
             }
         }
 
@@ -2350,7 +2350,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset not found");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset not found");
             }
         }
 
@@ -2371,7 +2371,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
 
         }
@@ -2444,7 +2444,7 @@ class DatasetsResourceTest {
 
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
             assertThat(actualResponse.hasEntity()).isTrue();
-            assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset not found");
+            assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset not found");
         }
 
         @Test
@@ -2535,7 +2535,7 @@ class DatasetsResourceTest {
 
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
             assertThat(actualResponse.hasEntity()).isTrue();
-            assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset not found");
+            assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset not found");
         }
 
         @Test
@@ -2611,7 +2611,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 
@@ -2657,7 +2657,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset not found");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset not found");
             }
         }
 
@@ -2683,7 +2683,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(400);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains("dataset_item id must be a version 7 UUID");
             }
         }
@@ -2746,7 +2746,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 
@@ -2916,7 +2916,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(
                         "trace workspace and dataset item workspace does not match");
             }
         }
@@ -2965,7 +2965,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(
                         "span workspace and dataset item workspace does not match");
             }
         }
@@ -3032,7 +3032,7 @@ class DatasetsResourceTest {
 
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
             assertThat(actualResponse.hasEntity()).isTrue();
-            assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset item not found");
+            assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Dataset item not found");
         }
 
     }
@@ -3243,7 +3243,8 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Dataset item not found");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("Dataset item not found");
             }
         }
 
@@ -3281,7 +3282,7 @@ class DatasetsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 

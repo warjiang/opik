@@ -7,8 +7,8 @@ import com.comet.opik.api.AutomationRuleEvaluatorLlmAsJudge;
 import com.comet.opik.api.AutomationRuleEvaluatorType;
 import com.comet.opik.api.AutomationRuleEvaluatorUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.google.inject.ImplementedBy;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.NotFoundException;
@@ -97,7 +97,7 @@ class AutomationRuleEvaluatorServiceImpl implements AutomationRuleEvaluatorServi
             } catch (UnableToExecuteStatementException e) {
                 if (e.getCause() instanceof SQLIntegrityConstraintViolationException) {
                     log.info(EVALUATOR_ALREADY_EXISTS, e);
-                    throw new EntityAlreadyExistsException(new ErrorMessage(List.of(EVALUATOR_ALREADY_EXISTS)));
+                    throw new EntityAlreadyExistsException(EVALUATOR_ALREADY_EXISTS);
                 } else {
                     throw e;
                 }
@@ -133,7 +133,7 @@ class AutomationRuleEvaluatorServiceImpl implements AutomationRuleEvaluatorServi
             } catch (UnableToExecuteStatementException e) {
                 if (e.getCause() instanceof SQLIntegrityConstraintViolationException) {
                     log.info(EVALUATOR_ALREADY_EXISTS);
-                    throw new EntityAlreadyExistsException(new ErrorMessage(List.of(EVALUATOR_ALREADY_EXISTS)));
+                    throw new EntityAlreadyExistsException(EVALUATOR_ALREADY_EXISTS);
                 } else {
                     throw e;
                 }
@@ -187,7 +187,7 @@ class AutomationRuleEvaluatorServiceImpl implements AutomationRuleEvaluatorServi
         String message = "AutomationRuleEvaluator not found";
         log.info(message);
         return new NotFoundException(message,
-                Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(List.of(message))).build());
+                Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(message)).build());
     }
 
     @Override

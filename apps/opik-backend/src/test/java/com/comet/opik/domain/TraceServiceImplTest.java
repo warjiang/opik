@@ -4,7 +4,6 @@ import com.comet.opik.api.Project;
 import com.comet.opik.api.Trace;
 import com.comet.opik.api.TraceSearchCriteria;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.error.InvalidUUIDVersionException;
 import com.comet.opik.api.events.TracesCreated;
 import com.comet.opik.infrastructure.auth.RequestContext;
@@ -99,7 +98,7 @@ class TraceServiceImplTest {
 
             // when
             when(projectService.getOrCreate(workspaceId, projectName, DEFAULT_USER))
-                    .thenThrow(new EntityAlreadyExistsException(new ErrorMessage(List.of("Project already exists"))));
+                    .thenThrow(new EntityAlreadyExistsException("Project already exists"));
 
             when(projectService.findByNames(workspaceId, List.of(projectName)))
                     .thenReturn(List.of(Project.builder().id(projectId).name(projectName).build())); // simulate project was already created

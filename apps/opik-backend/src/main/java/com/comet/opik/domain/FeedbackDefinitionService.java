@@ -4,9 +4,9 @@ import com.comet.opik.api.FeedbackDefinition;
 import com.comet.opik.api.FeedbackDefinitionCriteria;
 import com.comet.opik.api.Page;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.google.inject.ImplementedBy;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.inject.Singleton;
@@ -143,7 +143,7 @@ class FeedbackDefinitionServiceImpl implements FeedbackDefinitionService {
         } catch (UnableToExecuteStatementException e) {
             if (e.getCause() instanceof SQLIntegrityConstraintViolationException) {
                 log.info(FEEDBACK_ALREADY_EXISTS);
-                throw new EntityAlreadyExistsException(new ErrorMessage(List.of(FEEDBACK_ALREADY_EXISTS)));
+                throw new EntityAlreadyExistsException(FEEDBACK_ALREADY_EXISTS);
             } else {
                 throw e;
             }
@@ -180,7 +180,7 @@ class FeedbackDefinitionServiceImpl implements FeedbackDefinitionService {
         } catch (UnableToExecuteStatementException e) {
             if (e.getCause() instanceof SQLIntegrityConstraintViolationException) {
                 log.info(FEEDBACK_ALREADY_EXISTS);
-                throw new EntityAlreadyExistsException(new ErrorMessage(List.of(FEEDBACK_ALREADY_EXISTS)));
+                throw new EntityAlreadyExistsException(FEEDBACK_ALREADY_EXISTS);
             } else {
                 throw e;
             }
@@ -217,6 +217,8 @@ class FeedbackDefinitionServiceImpl implements FeedbackDefinitionService {
         String message = "Feedback definition not found";
         log.info(message);
         return new NotFoundException(message,
-                Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(List.of(message))).build());
+                Response.status(Response.Status.NOT_FOUND)
+                        .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), message))
+                        .build());
     }
 }

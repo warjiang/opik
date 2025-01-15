@@ -15,7 +15,6 @@ import com.comet.opik.api.SpanBatch;
 import com.comet.opik.api.Trace;
 import com.comet.opik.api.TraceBatch;
 import com.comet.opik.api.TraceUpdate;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.filter.Field;
 import com.comet.opik.api.filter.Filter;
 import com.comet.opik.api.filter.Operator;
@@ -45,6 +44,7 @@ import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.WebTarget;
@@ -3573,7 +3573,7 @@ class TracesResourceTest {
     private void createAndAssertErrorMessage(Trace trace, String apiKey, String workspaceName, int status,
             String errorMessage) {
         try (var response = traceResourceClient.createTrace(trace, apiKey, workspaceName, status)) {
-            assertThat(response.readEntity(ErrorMessage.class).errors().getFirst()).isEqualTo(errorMessage);
+            assertThat(response.readEntity(ErrorMessage.class).getMessage()).isEqualTo(errorMessage);
         }
     }
 
@@ -3605,8 +3605,8 @@ class TracesResourceTest {
 
         assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_NOT_FOUND);
         assertThat(actualResponse.hasEntity()).isTrue();
-        assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                .allMatch(error -> Pattern.matches("Trace not found", error));
+        assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                .matches(error -> Pattern.matches("Trace not found", error));
     }
 
     @Nested
@@ -3859,7 +3859,7 @@ class TracesResourceTest {
                 assertThat(actualResponse.hasEntity()).isTrue();
 
                 var responseBody = actualResponse.readEntity(ErrorMessage.class);
-                assertThat(responseBody.errors()).contains(errorMessage);
+                assertThat(responseBody.getMessage()).contains(errorMessage);
             }
         }
 
@@ -4321,7 +4321,7 @@ class TracesResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(400);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(com.comet.opik.api.error.ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains("Trace id must be a version 7 UUID");
             }
         }
@@ -4694,8 +4694,8 @@ class TracesResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .allMatch(error -> Pattern.matches("Trace id: .+ not found", error));
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .matches(error -> Pattern.matches("Trace id: .+ not found", error));
             }
         }
 
@@ -4714,7 +4714,7 @@ class TracesResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 
@@ -5035,7 +5035,7 @@ class TracesResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 
@@ -5180,7 +5180,7 @@ class TracesResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(400);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains("trace id must be a version 7 UUID");
             }
         }

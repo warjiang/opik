@@ -10,7 +10,6 @@ import com.comet.opik.api.TraceCountResponse;
 import com.comet.opik.api.TraceSearchCriteria;
 import com.comet.opik.api.TraceUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.error.IdentifierMismatchException;
 import com.comet.opik.api.events.TracesCreated;
 import com.comet.opik.api.events.TracesUpdated;
@@ -22,6 +21,7 @@ import com.comet.opik.utils.WorkspaceUtils;
 import com.google.common.base.Preconditions;
 import com.google.common.eventbus.EventBus;
 import com.google.inject.ImplementedBy;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -216,7 +216,7 @@ class TraceServiceImpl implements TraceService {
 
             // otherwise, reject the trace creation
             return Mono
-                    .error(new EntityAlreadyExistsException(new ErrorMessage(List.of("Trace already exists"))));
+                    .error(new EntityAlreadyExistsException("Trace already exists"));
         });
     }
 
@@ -287,12 +287,14 @@ class TraceServiceImpl implements TraceService {
 
     private <T> Mono<T> failWithConflict(String error) {
         log.info(error);
-        return Mono.error(new IdentifierMismatchException(new ErrorMessage(List.of(error))));
+        return Mono.error(new IdentifierMismatchException(error));
     }
 
     private NotFoundException failWithNotFound(String error) {
         log.info(error);
-        return new NotFoundException(Response.status(404).entity(new ErrorMessage(List.of(error))).build());
+        return new NotFoundException(Response.status(Response.Status.NOT_FOUND)
+                .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), error))
+                .build());
     }
 
     @Override

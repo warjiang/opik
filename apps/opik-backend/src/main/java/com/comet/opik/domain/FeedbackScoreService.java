@@ -4,11 +4,11 @@ import com.comet.opik.api.FeedbackScore;
 import com.comet.opik.api.FeedbackScoreBatchItem;
 import com.comet.opik.api.FeedbackScoreNames;
 import com.comet.opik.api.Project;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.utils.WorkspaceUtils;
 import com.google.inject.ImplementedBy;
 import com.google.inject.Singleton;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
@@ -267,8 +267,9 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
 
     private Mono<Long> failWithNotFound(String errorMessage) {
         log.info(errorMessage);
-        return Mono.error(new NotFoundException(Response.status(404)
-                .entity(new ErrorMessage(List.of(errorMessage))).build()));
+        return Mono.error(new NotFoundException(Response.status(Response.Status.NOT_FOUND)
+                .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), errorMessage))
+                .build()));
     }
 
     private Mono<Long> extractResult(Long rowsUpdated) {
@@ -278,8 +279,9 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
     private Throwable failWithTraceNotFound(UUID id) {
         String message = "Trace id: %s not found".formatted(id);
         log.info(message);
-        return new NotFoundException(Response.status(404)
-                .entity(new ErrorMessage(List.of(message))).build());
+        return new NotFoundException(Response.status(Response.Status.NOT_FOUND)
+                .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), message))
+                .build());
     }
 
     private NotFoundException failWithSpanNotFound(UUID id) {

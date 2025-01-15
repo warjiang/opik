@@ -6,10 +6,10 @@ import com.comet.opik.api.DatasetItemBatch;
 import com.comet.opik.api.DatasetItemSearchCriteria;
 import com.comet.opik.api.DatasetItemStreamRequest;
 import com.comet.opik.api.PageColumns;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.error.IdentifierMismatchException;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.google.inject.ImplementedBy;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -19,6 +19,7 @@ import jakarta.ws.rs.core.Response;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.http.HttpStatus;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -96,12 +97,17 @@ class DatasetItemServiceImpl implements DatasetItemService {
 
     private Throwable failWithError(String error) {
         log.info(error);
-        return new ClientErrorException(Response.status(422).entity(new ErrorMessage(List.of(error))).build());
+        return new ClientErrorException(
+                Response.status(HttpStatus.SC_UNPROCESSABLE_ENTITY)
+                        .entity(new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, error))
+                        .build());
     }
 
     private ClientErrorException newConflict(String error) {
         log.info(error);
-        return new ClientErrorException(Response.status(409).entity(new ErrorMessage(List.of(error))).build());
+        return new ClientErrorException(Response.status(Response.Status.CONFLICT)
+                .entity(new ErrorMessage(Response.Status.CONFLICT.getStatusCode(), error))
+                .build());
     }
 
     @Override
@@ -187,13 +193,15 @@ class DatasetItemServiceImpl implements DatasetItemService {
 
     private <T> Mono<T> failWithConflict(String message) {
         log.info(message);
-        return Mono.error(new IdentifierMismatchException(new ErrorMessage(List.of(message))));
+        return Mono.error(new IdentifierMismatchException(message));
     }
 
     private NotFoundException failWithNotFound(String message) {
         log.info(message);
         return new NotFoundException(message,
-                Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(List.of(message))).build());
+                Response.status(Response.Status.NOT_FOUND)
+                        .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), message))
+                        .build());
     }
 
     @Override

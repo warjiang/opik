@@ -13,7 +13,6 @@ import com.comet.opik.api.Span;
 import com.comet.opik.api.SpanBatch;
 import com.comet.opik.api.SpanUpdate;
 import com.comet.opik.api.Trace;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.filter.Field;
 import com.comet.opik.api.filter.Filter;
 import com.comet.opik.api.filter.Operator;
@@ -46,6 +45,7 @@ import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.WebTarget;
@@ -3433,7 +3433,7 @@ class SpansResourceTest {
     private void createAndAssertErrorMessage(Span span, String apiKey, String workspaceName, int status,
             String errorMessage) {
         try (var response = spanResourceClient.createSpan(span, apiKey, workspaceName, status)) {
-            assertThat(response.readEntity(ErrorMessage.class).errors().getFirst()).isEqualTo(errorMessage);
+            assertThat(response.readEntity(ErrorMessage.class).getMessage()).isEqualTo(errorMessage);
         }
     }
 
@@ -3521,7 +3521,7 @@ class SpansResourceTest {
                 .build();
 
         try (var response = spanResourceClient.createSpan(expectedSpan, API_KEY, TEST_WORKSPACE, 422)) {
-            assertThat(response.readEntity(ErrorMessage.class).errors().getFirst())
+            assertThat(response.readEntity(ErrorMessage.class).getMessage())
                     .isEqualTo("totalEstimatedCost must be greater than or equal to 0.0");
         }
     }
@@ -3631,7 +3631,7 @@ class SpansResourceTest {
             assertThat(actualResponse.hasEntity()).isTrue();
 
             var errorMessage = actualResponse.readEntity(ErrorMessage.class);
-            assertThat(errorMessage.errors()).contains("Span already exists");
+            assertThat(errorMessage.getMessage()).contains("Span already exists");
         }
     }
 
@@ -3666,7 +3666,7 @@ class SpansResourceTest {
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(400);
             assertThat(actualResponse.hasEntity()).isTrue();
             var errorMessage = actualResponse.readEntity(ErrorMessage.class);
-            assertThat(errorMessage.errors().getFirst()).contains("Cannot deserialize value of type");
+            assertThat(errorMessage.getMessage()).contains("Cannot deserialize value of type");
         }
     }
 
@@ -3766,7 +3766,7 @@ class SpansResourceTest {
                 assertThat(actualResponse.hasEntity()).isTrue();
 
                 var responseBody = actualResponse.readEntity(ErrorMessage.class);
-                assertThat(responseBody.errors()).contains(errorMessage);
+                assertThat(responseBody.getMessage()).contains(errorMessage);
             }
         }
 
@@ -4119,7 +4119,7 @@ class SpansResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(400);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(com.comet.opik.api.error.ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains("Span id must be a version 7 UUID");
             }
         }
@@ -4247,7 +4247,7 @@ class SpansResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains(errorMessage);
             }
         }
@@ -4312,7 +4312,7 @@ class SpansResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains(errorMessage);
             }
         }
@@ -4658,7 +4658,7 @@ class SpansResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 
@@ -5015,7 +5015,7 @@ class SpansResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains(errorMessage);
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains(errorMessage);
             }
         }
 
@@ -5177,7 +5177,7 @@ class SpansResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(400);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains("span id must be a version 7 UUID");
             }
         }

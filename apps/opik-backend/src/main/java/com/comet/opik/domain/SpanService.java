@@ -8,7 +8,6 @@ import com.comet.opik.api.SpanBatch;
 import com.comet.opik.api.SpanSearchCriteria;
 import com.comet.opik.api.SpanUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.error.IdentifierMismatchException;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.infrastructure.lock.LockService;
@@ -137,7 +136,7 @@ public class SpanService {
 
             // otherwise, reject the span creation
             return Mono
-                    .error(new EntityAlreadyExistsException(new ErrorMessage(List.of("Span already exists"))));
+                    .error(new EntityAlreadyExistsException("Span already exists"));
         });
     }
 
@@ -245,7 +244,7 @@ public class SpanService {
 
     private <T> Mono<T> failWithConflict(String error) {
         log.info(error);
-        return Mono.error(new IdentifierMismatchException(new ErrorMessage(List.of(error))));
+        return Mono.error(new IdentifierMismatchException(error));
     }
 
     public Mono<Boolean> validateSpanWorkspace(@NonNull String workspaceId, @NonNull Set<UUID> spanIds) {

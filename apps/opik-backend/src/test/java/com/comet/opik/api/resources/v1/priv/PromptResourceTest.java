@@ -5,7 +5,6 @@ import com.comet.opik.api.CreatePromptVersion;
 import com.comet.opik.api.Prompt;
 import com.comet.opik.api.PromptVersion;
 import com.comet.opik.api.PromptVersionRetrieve;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.resources.utils.AuthTestUtils;
 import com.comet.opik.api.resources.utils.ClickHouseContainerUtils;
 import com.comet.opik.api.resources.utils.ClientSupportUtils;
@@ -20,6 +19,7 @@ import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.podam.PodamFactoryUtils;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.WebTarget;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -892,7 +892,7 @@ class PromptResourceTest {
 
             return Stream.of(
                     Arguments.of(prompt, HttpStatus.SC_BAD_REQUEST,
-                            new ErrorMessage(List.of("prompt id must be a version 7 UUID")),
+                            new ErrorMessage(HttpStatus.SC_BAD_REQUEST, "prompt id must be a version 7 UUID"),
                             ErrorMessage.class),
                     Arguments.of(duplicatedPrompt.toBuilder().name(UUID.randomUUID().toString()).build(),
                             HttpStatus.SC_CONFLICT,
@@ -906,11 +906,12 @@ class PromptResourceTest {
                             io.dropwizard.jersey.errors.ErrorMessage.class),
                     Arguments.of(factory.manufacturePojo(Prompt.class).toBuilder().description("").build(),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("description must not be blank")),
+                            new ErrorMessage(HttpStatus.SC_BAD_REQUEST, "description must not be blank"),
                             ErrorMessage.class),
                     Arguments.of(factory.manufacturePojo(Prompt.class).toBuilder().name("").build(),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("name must not be blank")), ErrorMessage.class));
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank"),
+                            ErrorMessage.class));
         }
     }
 
@@ -1033,15 +1034,15 @@ class PromptResourceTest {
                             io.dropwizard.jersey.errors.ErrorMessage.class),
                     Arguments.of(factory.manufacturePojo(Prompt.class).toBuilder().name(null).build(),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("name must not be blank")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank"),
                             ErrorMessage.class),
                     Arguments.of(factory.manufacturePojo(Prompt.class).toBuilder().name("").build(),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("name must not be blank")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank"),
                             ErrorMessage.class),
                     Arguments.of(factory.manufacturePojo(Prompt.class).toBuilder().description("").build(),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("description must not be blank")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "description must not be blank"),
                             ErrorMessage.class));
         }
     }
@@ -1629,55 +1630,57 @@ class PromptResourceTest {
         Stream<Arguments> when__promptVersionIsInvalid__thenReturnError() {
             return Stream.of(
                     arguments(new CreatePromptVersion(null, factory.manufacturePojo(PromptVersion.class)),
-                            HttpStatus.SC_UNPROCESSABLE_ENTITY, new ErrorMessage(List.of("name must not be blank")),
+                            HttpStatus.SC_UNPROCESSABLE_ENTITY,
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank"),
                             ErrorMessage.class),
                     arguments(new CreatePromptVersion("", factory.manufacturePojo(PromptVersion.class)),
-                            HttpStatus.SC_UNPROCESSABLE_ENTITY, new ErrorMessage(List.of("name must not be blank")),
+                            HttpStatus.SC_UNPROCESSABLE_ENTITY,
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank"),
                             ErrorMessage.class),
                     arguments(
                             new CreatePromptVersion(UUID.randomUUID().toString(),
                                     factory.manufacturePojo(PromptVersion.class)
                                             .toBuilder().commit("").build()),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of(
-                                    "version.commit if present, the commit message must be 8 alphanumeric characters long")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY,
+                                    "version.commit if present, the commit message must be 8 alphanumeric characters long"),
                             ErrorMessage.class),
                     arguments(
                             new CreatePromptVersion(UUID.randomUUID().toString(),
                                     factory.manufacturePojo(PromptVersion.class)
                                             .toBuilder().commit("1234567").build()),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of(
-                                    "version.commit if present, the commit message must be 8 alphanumeric characters long")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY,
+                                    "version.commit if present, the commit message must be 8 alphanumeric characters long"),
                             ErrorMessage.class),
                     arguments(
                             new CreatePromptVersion(UUID.randomUUID().toString(),
                                     factory.manufacturePojo(PromptVersion.class)
                                             .toBuilder().commit("1234-567").build()),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of(
-                                    "version.commit if present, the commit message must be 8 alphanumeric characters long")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY,
+                                    "version.commit if present, the commit message must be 8 alphanumeric characters long"),
                             ErrorMessage.class),
                     arguments(
                             new CreatePromptVersion(UUID.randomUUID().toString(),
                                     factory.manufacturePojo(PromptVersion.class)
                                             .toBuilder().id(UUID.randomUUID()).build()),
                             HttpStatus.SC_BAD_REQUEST,
-                            new ErrorMessage(List.of("prompt version id must be a version 7 UUID")),
+                            new ErrorMessage(HttpStatus.SC_BAD_REQUEST, "prompt version id must be a version 7 UUID"),
                             ErrorMessage.class),
                     arguments(
                             new CreatePromptVersion(UUID.randomUUID().toString(),
                                     factory.manufacturePojo(PromptVersion.class)
                                             .toBuilder().template("").build()),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("version.template must not be blank")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "version.template must not be blank"),
                             ErrorMessage.class),
                     arguments(
                             new CreatePromptVersion(UUID.randomUUID().toString(),
                                     factory.manufacturePojo(PromptVersion.class)
                                             .toBuilder().template(null).build()),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
-                            new ErrorMessage(List.of("version.template must not be blank")),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "version.template must not be blank"),
                             ErrorMessage.class));
         }
     }
@@ -2021,12 +2024,12 @@ class PromptResourceTest {
                             new PromptVersionRetrieve(null, null),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
                             ErrorMessage.class,
-                            new ErrorMessage(List.of("name must not be blank"))),
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank")),
                     arguments(
                             new PromptVersionRetrieve("", null),
                             HttpStatus.SC_UNPROCESSABLE_ENTITY,
                             ErrorMessage.class,
-                            new ErrorMessage(List.of("name must not be blank"))));
+                            new ErrorMessage(HttpStatus.SC_UNPROCESSABLE_ENTITY, "name must not be blank")));
         }
     }
 

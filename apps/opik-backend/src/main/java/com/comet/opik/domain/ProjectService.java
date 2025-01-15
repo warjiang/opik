@@ -8,7 +8,6 @@ import com.comet.opik.api.ProjectIdLastUpdated;
 import com.comet.opik.api.ProjectStats;
 import com.comet.opik.api.ProjectUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.sorting.Direction;
 import com.comet.opik.api.sorting.SortableFields;
 import com.comet.opik.api.sorting.SortingFactoryProjects;
@@ -19,6 +18,7 @@ import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.infrastructure.db.TransactionTemplateAsync;
 import com.comet.opik.utils.PaginationUtils;
 import com.google.inject.ImplementedBy;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import jakarta.inject.Singleton;
@@ -105,7 +105,9 @@ class ProjectServiceImpl implements ProjectService {
         String message = "Project not found";
         log.info(message);
         return new NotFoundException(message,
-                Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(List.of(message))).build());
+                Response.status(Response.Status.NOT_FOUND)
+                        .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), message))
+                        .build());
     }
 
     @Override
@@ -148,7 +150,7 @@ class ProjectServiceImpl implements ProjectService {
 
     private EntityAlreadyExistsException newConflict() {
         log.info(PROJECT_ALREADY_EXISTS);
-        return new EntityAlreadyExistsException(new ErrorMessage(List.of(PROJECT_ALREADY_EXISTS)));
+        return new EntityAlreadyExistsException(PROJECT_ALREADY_EXISTS);
     }
 
     @Override

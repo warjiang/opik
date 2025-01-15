@@ -12,7 +12,6 @@ import com.comet.opik.api.ProjectUpdate;
 import com.comet.opik.api.Span;
 import com.comet.opik.api.Trace;
 import com.comet.opik.api.TraceUpdate;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.resources.utils.AuthTestUtils;
 import com.comet.opik.api.resources.utils.BigDecimalCollectors;
 import com.comet.opik.api.resources.utils.ClickHouseContainerUtils;
@@ -39,6 +38,7 @@ import com.comet.opik.utils.JsonUtils;
 import com.comet.opik.utils.ValidationUtils;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.HttpMethod;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -620,7 +620,7 @@ class ProjectsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(expectedStatus);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
                         .contains(error);
             }
         }
@@ -1540,7 +1540,7 @@ class ProjectsResourceTest {
 
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
             assertThat(actualResponse.hasEntity()).isTrue();
-            assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Project not found");
+            assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Project not found");
         }
 
         @Test
@@ -1765,7 +1765,8 @@ class ProjectsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("name must not be blank");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("name must not be blank");
             }
         }
 
@@ -1788,7 +1789,8 @@ class ProjectsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Project already exists");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("Project already exists");
             }
         }
 
@@ -1905,7 +1907,7 @@ class ProjectsResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("Project not found");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage()).contains("Project not found");
             }
         }
 
@@ -1982,7 +1984,8 @@ class ProjectsResourceTest {
                             Entity.json(ProjectUpdate.builder().description("Simple Test: ").name("").build()))) {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors()).contains("name must not be blank");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("name must not be blank");
             }
         }
     }

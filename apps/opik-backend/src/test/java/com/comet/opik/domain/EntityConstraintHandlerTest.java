@@ -1,7 +1,6 @@
 package com.comet.opik.domain;
 
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import io.dropwizard.jersey.errors.ErrorMessage;
 import org.jdbi.v3.core.statement.StatementContext;
 import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class EntityConstraintHandlerTest {
 
     private static final Supplier<EntityAlreadyExistsException> ENTITY_ALREADY_EXISTS = () -> new EntityAlreadyExistsException(
-            new ErrorMessage(409, "Entity already exists"));
+            "Entity already exists");
 
     @Test
     void testWithError() {

@@ -2,7 +2,6 @@ package com.comet.opik.api.resources.v1.priv;
 
 import com.comet.opik.api.BatchDelete;
 import com.comet.opik.api.FeedbackDefinition;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.resources.utils.AuthTestUtils;
 import com.comet.opik.api.resources.utils.ClientSupportUtils;
 import com.comet.opik.api.resources.utils.MigrationUtils;
@@ -16,6 +15,7 @@ import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
@@ -819,7 +819,7 @@ class FeedbackDefinitionResourceTest {
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
             var actualEntity = actualResponse.readEntity(ErrorMessage.class);
 
-            assertThat(actualEntity.errors()).containsExactly("Feedback definition not found");
+            assertThat(actualEntity.getMessage()).contains("Feedback definition not found");
         }
 
     }
@@ -891,8 +891,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(409);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("Feedback already exists");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("Feedback already exists");
             }
         }
 
@@ -913,8 +913,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details must not be null");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details must not be null");
 
             }
         }
@@ -936,8 +936,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("name must not be blank");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("name must not be blank");
             }
         }
 
@@ -960,8 +960,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details.categories must not be null");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details.categories must not be null");
             }
         }
 
@@ -982,8 +982,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details.categories size must be between 2 and 2147483647");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details.categories size must be between 2 and 2147483647");
             }
         }
 
@@ -1007,8 +1007,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details.categories size must be between 2 and 2147483647");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details.categories size must be between 2 and 2147483647");
             }
         }
 
@@ -1032,8 +1032,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details.min must not be null");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details.min must not be null");
             }
         }
 
@@ -1057,8 +1057,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details.max must not be null");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details.max must not be null");
             }
         }
 
@@ -1083,8 +1083,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(422);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("details.min has to be smaller than details.max");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("details.min has to be smaller than details.max");
             }
         }
 
@@ -1120,7 +1120,7 @@ class FeedbackDefinitionResourceTest {
                 assertThat(actualResponse.hasEntity()).isTrue();
 
                 var actualEntity = actualResponse.readEntity(ErrorMessage.class);
-                assertThat(actualEntity.errors()).containsExactly("Feedback definition not found");
+                assertThat(actualEntity.getMessage()).contains("Feedback definition not found");
             }
         }
 
@@ -1201,8 +1201,8 @@ class FeedbackDefinitionResourceTest {
 
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(404);
                 assertThat(actualResponse.hasEntity()).isTrue();
-                assertThat(actualResponse.readEntity(ErrorMessage.class).errors())
-                        .containsExactly("Feedback definition not found");
+                assertThat(actualResponse.readEntity(ErrorMessage.class).getMessage())
+                        .contains("Feedback definition not found");
             }
         }
 

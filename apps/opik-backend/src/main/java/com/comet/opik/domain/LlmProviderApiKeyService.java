@@ -3,8 +3,8 @@ package com.comet.opik.domain;
 import com.comet.opik.api.ProviderApiKey;
 import com.comet.opik.api.ProviderApiKeyUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
-import com.comet.opik.api.error.ErrorMessage;
 import com.google.inject.ImplementedBy;
+import io.dropwizard.jersey.errors.ErrorMessage;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import jakarta.ws.rs.NotFoundException;
@@ -140,13 +140,14 @@ class LlmProviderApiKeyServiceImpl implements LlmProviderApiKeyService {
 
     private EntityAlreadyExistsException newConflict() {
         log.info(PROVIDER_API_KEY_ALREADY_EXISTS);
-        return new EntityAlreadyExistsException(new ErrorMessage(List.of(PROVIDER_API_KEY_ALREADY_EXISTS)));
+        return new EntityAlreadyExistsException(PROVIDER_API_KEY_ALREADY_EXISTS);
     }
 
     private NotFoundException createNotFoundError() {
         String message = "Provider api key not found";
         log.info(message);
         return new NotFoundException(message,
-                Response.status(Response.Status.NOT_FOUND).entity(new ErrorMessage(List.of(message))).build());
+                Response.status(Response.Status.NOT_FOUND)
+                        .entity(new ErrorMessage(Response.Status.NOT_FOUND.getStatusCode(), message)).build());
     }
 }
