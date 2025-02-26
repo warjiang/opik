@@ -184,4 +184,5 @@ class OpikGuiceyLifecycleEventListenerTest {
     static void tearDown() {
         MYSQL_CONTAINER.stop();
     }
+
 }
