@@ -1,16 +1,17 @@
 import math
 from functools import cached_property
-from typing import Any, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 import pydantic
 import json
 
-from litellm.types.utils import ModelResponse
+if TYPE_CHECKING:
+    from litellm.types.utils import ModelResponse
 
 from opik.evaluation.metrics import base_metric, score_result
 from opik.evaluation.models import base_model, models_factory
 from opik.logging_messages import GEVAL_SCORE_CALC_FAILED
 from .template import G_EVAL_COT_TEMPLATE, G_EVAL_QUERY_TEMPLATE
-from ... import exceptions
+from opik import exceptions
 
 
 class GEvalScoreFormat(pydantic.BaseModel):
@@ -145,7 +146,7 @@ class GEval(base_metric.BaseMetric):
 
         return self._parse_model_output(model_output)
 
-    def _parse_model_output(self, content: ModelResponse) -> score_result.ScoreResult:
+    def _parse_model_output(self, content: "ModelResponse") -> score_result.ScoreResult:
         """
         This method computes the final score based on the model's response. The model's response is a dictionary
         with a `score` key and a `reason` key. The prompt template also specifies that the score should be an integer
@@ -166,6 +167,12 @@ class GEval(base_metric.BaseMetric):
             weighted_score_sum = 0.0
 
             for token_info in top_score_logprobs:
+                # litellm in v1.60.2 (or earlier) started provide logprobes
+                # as pydantic model, not just dict
+                # we will convert model to dict to provide backward compatability
+                if not isinstance(token_info, dict):
+                    token_info = token_info.model_dump()
+
                 # if not a number
                 if not token_info["token"].isdecimal():
                     continue

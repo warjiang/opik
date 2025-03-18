@@ -98,7 +98,7 @@ health:
 distributedLock:
   # Default: 500
   # Description: Lease time in milliseconds
-  lockTimeout: 500
+  lockTimeoutMS: 500
   # Default: 1
   # Description: This value has to be considerably higher than the lockTimeoutMS value, as it has to guarantee that the
   # last thread to join the queue to acquire the lock will have enough time to execute the action. Then, the lock will
@@ -109,26 +109,31 @@ distributedLock:
 
 # Redis configuration
 redis:
-  # Default:
+  # Default: redis://:opik@localhost:6379/0
   # Description: single node redis's URL
-  singleNodeUrl:
+  singleNodeUrl: redis://:opik@localhost:6379/0
+
+openTelemetry:
+  # Default: 3h
+  # Description: how long it takes to expire non-used keys
+  ttl: 3h
 
 # Authentication configuration. This is not enabled by default for open source installations.
 authentication:
   # Default: false
   # Description: Whether or not to enable authentication
-  enabled: ${AUTH_ENABLED:-false}
+  enabled: false
   # Default: 0
   # Description: API key resolution cache TTL (seconds). Setting this value to 0 means no caching.
-  apiKeyResolutionCacheTTLInSec: ${AUTH_API_KEY_RESOLUTION_CACHE_TTL_IN_SEC:-0}
+  apiKeyResolutionCacheTTLInSec: 0
   # Default:
   # Description: Configures how to authenticate requests which originates from the sdk
   sdk:
-    url: ${AUTH_SDK_URL:-''}
+    url: ''
   # Default:
   # Description: Configures how to authenticate requests which originates from the ui
   ui:
-    url: ${AUTH_UI_URL:-''}
+    url: ''
 
 # https://www.dropwizard.io/en/stable/manual/configuration.html#servers
 server:
@@ -168,23 +173,94 @@ usageReport:
 metadata:
   # Default: latest
   # Description: The application version
-  version: ${OPIK_VERSION:-latest}
+  version: latest
 
 # CORS related configuration
 cors:
   # Default: false
   # Description: Whether or not to allow cross site scripting
-  enabled: ${CORS:-false}
+  enabled: false
 
 # Encryption related configuration
 encryption:
   # Default: GiTHubiLoVeYouAA
   # Description: Encryption key to use when storing sensitive information
-  key: ${OPIK_ENCRYPTION_KEY:-'GiTHubiLoVeYouAA'}
+  key: 'GiTHubiLoVeYouAA'
+
+# Configuration for Online Scoring
+onlineScoring:
+  # Default: 500 ms
+  # Description: How often Online Scoring will check Redis for new messages (in milliseconds)
+  poolingInterval: 500ms
+  # Default: online_scoring
+  # Description: A consumer group name so multiple instances can share the stream load
+  consumerGroupName: 'online_scoring'
+  # Default: 3
+  # Description: Maximum number of messages returned within a Redis Stream get
+  consumerBatchSize: 3
+  streams:
+    - scorer: llm_as_judge
+      streamName: stream_scoring_llm_as_judge
+      codec: java
 
 # LLM providers client configuration
 llmProviderClient:
+  # Default: 60s
+  # Description: Call timeout for LLM providers
+  callTimeout: 60s
+  # Default: false
+  # Description: Whether or not to log requests
+  logRequests: false
+  # Default: false
+  # Description: Whether or not to log responses
+  logResponses: false
   openAiClient:
     # See demo endpoint Langchain4j documentation: https://docs.langchain4j.dev/get-started
     # Not https but only used for testing purposes. It's fine as long as not sensitive data is sent.
     url: http://langchain4j.dev/demo/openai/v1
+  # Configuration for Anthropic client
+  anthropicClient:
+    # Default: https://api.anthropic.com/v1/
+    # Description: Anthropic API base URL
+    url: https://api.anthropic.com/v1/
+    # Default: 2023-06-01
+    # Description: Anthropic API version https://docs.anthropic.com/en/api/versioning
+    version: '2023-06-01'
+  # Default: https://openrouter.ai/api/v1
+  # Description: OpenRouter API URL
+  openRouterUrl: https://openrouter.ai/api/v1
+
+# Configuration for cache manager
+cacheManager:
+  # Default: false
+  # Description: Whether or not cache manager is enabled
+  enabled: false
+  # Default: PT1S
+  # Description: Time to live for cache entries in using the formats accepted are based on the ISO-8601: https://docs.oracle.com/javase/8/docs/api/java/time/Duration.html#parse-java.lang.CharSequence-
+  defaultDuration: PT1S
+  caches:
+    # Default: {}
+    # Description: Dynamically created caches with their respective time to live in seconds
+    testCache: PT1S
+
+# Configuration for clickhouse log appender
+clickHouseLogAppender:
+  # Default: 1000
+  # Description: Number of log messages to be batched before sending to ClickHouse
+  batchSize: 1000
+
+  # Default: PT0.500S or 500ms
+  # Description: Time interval after which the log messages are sent to ClickHouse if the batch size is not reached
+  flushIntervalDuration: PT0.500S
+
+# Configuration AWS S3
+s3Config:
+  s3Region: 'us-east-1'
+  # Description: AWS S3 bucket for Opik
+  s3BucketName: 'test-bucket'
+  # Description: AWS S3 presign url timeout
+  preSignUrlTimeoutSec: 60
+  # Description: Url for local MinIO or Aws
+  s3Url: http://localhost:9000
+  # Description: Whether installation uses MinIO or AWS S3
+  isMinIO: true

@@ -7,11 +7,13 @@ import com.comet.opik.api.Span;
 import com.comet.opik.api.SpanBatch;
 import com.comet.opik.api.SpanSearchCriteria;
 import com.comet.opik.api.SpanUpdate;
+import com.comet.opik.api.SpansCountResponse;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
 import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.error.IdentifierMismatchException;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.infrastructure.lock.LockService;
+import com.comet.opik.utils.BinaryOperatorUtils;
 import com.comet.opik.utils.WorkspaceUtils;
 import com.google.common.base.Preconditions;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
@@ -21,21 +23,25 @@ import jakarta.ws.rs.NotFoundException;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static com.comet.opik.utils.AsyncUtils.makeMonoContextAware;
+import static com.comet.opik.utils.ErrorUtils.failWithNotFound;
 
 @Singleton
 @RequiredArgsConstructor(onConstructor = @__(@Inject))
@@ -45,12 +51,13 @@ public class SpanService {
     public static final String PARENT_SPAN_IS_MISMATCH = "parent_span_id does not match the existing span";
     public static final String TRACE_ID_MISMATCH = "trace_id does not match the existing span";
     public static final String SPAN_KEY = "Span";
-    public static final String PROJECT_NAME_MISMATCH = "Project name and workspace name do not match the existing span";
+    public static final String PROJECT_AND_WORKSPACE_NAME_MISMATCH = "Project name and workspace name do not match the existing span";
 
     private final @NonNull SpanDAO spanDAO;
     private final @NonNull ProjectService projectService;
     private final @NonNull IdGenerator idGenerator;
     private final @NonNull LockService lockService;
+    private final @NonNull CommentService commentService;
 
     @WithSpan
     public Mono<Span.SpanPage> find(int page, int size, @NonNull SpanSearchCriteria searchCriteria) {
@@ -80,14 +87,13 @@ public class SpanService {
     @WithSpan
     public Mono<Span> getById(@NonNull UUID id) {
         log.info("Getting span by id '{}'", id);
-        return spanDAO.getById(id).switchIfEmpty(Mono.defer(() -> Mono.error(newNotFoundException(id))));
+        return spanDAO.getById(id).switchIfEmpty(Mono.defer(() -> Mono.error(failWithNotFound("Span", id))));
     }
 
     @WithSpan
     public Mono<UUID> create(@NonNull Span span) {
         var id = span.id() == null ? idGenerator.generateId() : span.id();
         var projectName = WorkspaceUtils.getProjectName(span.projectName());
-
         return IdGenerator
                 .validateVersionAsync(id, SPAN_KEY)
                 .then(getOrCreateProject(projectName))
@@ -97,56 +103,37 @@ public class SpanService {
     }
 
     private Mono<Project> getOrCreateProject(String projectName) {
-        return makeMonoContextAware((userName, workspaceId) -> {
-            return Mono.fromCallable(() -> projectService.getOrCreate(workspaceId, projectName, userName))
-                    .onErrorResume(e -> handleProjectCreationError(e, projectName, workspaceId))
-                    .subscribeOn(Schedulers.boundedElastic());
-        });
-
+        return makeMonoContextAware((userName, workspaceId) -> Mono
+                .fromCallable(() -> projectService.getOrCreate(workspaceId, projectName, userName))
+                .onErrorResume(e -> handleProjectCreationError(e, projectName, workspaceId))
+                .subscribeOn(Schedulers.boundedElastic()));
     }
 
     private Mono<UUID> insertSpan(Span span, Project project, UUID id) {
-        //TODO: refactor to implement proper conflict resolution
-        return spanDAO.getById(id)
-                .flatMap(existingSpan -> insertSpan(span, project, id, existingSpan))
+        return spanDAO.getPartialById(id)
+                .flatMap(partialExistingSpan -> insertSpan(span, project, id, partialExistingSpan))
                 .switchIfEmpty(Mono.defer(() -> create(span, project, id)))
                 .onErrorResume(this::handleSpanDBError);
     }
 
-    private Mono<UUID> insertSpan(Span span, Project project, UUID id, Span existingSpan) {
+    private Mono<UUID> insertSpan(Span span, Project project, UUID id, Span partialExistingSpan) {
         return Mono.defer(() -> {
-            // check if a partial span exists caused by a patch request
-            if (existingSpan.name().isBlank()
-                    && existingSpan.startTime().equals(Instant.EPOCH)
-                    && existingSpan.type() == null
-                    && existingSpan.projectId().equals(project.id())) {
+            // Check if a partial span exists caused by a patch request, if so, proceed to insert.
+            if (StringUtils.isBlank(partialExistingSpan.name())
+                    && Instant.EPOCH.equals(partialExistingSpan.startTime())
+                    && partialExistingSpan.type() == null) {
                 return create(span, project, id);
             }
-
-            if (!project.id().equals(existingSpan.projectId())) {
-                return failWithConflict(PROJECT_NAME_MISMATCH);
-            }
-
-            if (!Objects.equals(span.parentSpanId(), existingSpan.parentSpanId())) {
-                return failWithConflict(PARENT_SPAN_IS_MISMATCH);
-            }
-
-            if (!span.traceId().equals(existingSpan.traceId())) {
-                return failWithConflict(TRACE_ID_MISMATCH);
-            }
-
-            // otherwise, reject the span creation
-            return Mono
-                    .error(new EntityAlreadyExistsException(new ErrorMessage(List.of("Span already exists"))));
+            // Otherwise, a non-partial span already exists, so we ignore the insertion and just return the id.
+            return Mono.just(id);
         });
     }
 
     private Mono<UUID> create(Span span, Project project, UUID id) {
-        var newSpan = span.toBuilder().id(id).projectId(project.id()).build();
-        log.info("Inserting span with id '{}', traceId '{}', parentSpanId '{}'",
-                span.id(), span.traceId(), span.parentSpanId());
-
-        return spanDAO.insert(newSpan).thenReturn(newSpan.id());
+        span = span.toBuilder().id(id).projectId(project.id()).build();
+        log.info("Inserting span with id '{}', projectId '{}', traceId '{}', parentSpanId '{}'",
+                span.id(), span.projectId(), span.traceId(), span.parentSpanId());
+        return spanDAO.insert(span).thenReturn(span.id());
     }
 
     private Mono<Project> handleProjectCreationError(Throwable exception, String projectName, String workspaceId) {
@@ -198,12 +185,10 @@ public class SpanService {
     private <T> Mono<T> handleSpanDBError(Throwable ex) {
         if (ex instanceof ClickHouseException
                 && ex.getMessage().contains("TOO_LARGE_STRING_SIZE")
-                && (ex.getMessage().contains("_CAST(project_id, FixedString(36))")
-                        || ex.getMessage()
-                                .contains(", CAST(leftPad(workspace_id, 40, '*'), 'FixedString(19)') ::"))) {
-            return failWithConflict(PROJECT_NAME_MISMATCH);
+                && ex.getMessage().contains("String too long for type FixedString")
+                && (ex.getMessage().contains("project_id") || ex.getMessage().contains("workspace_id"))) {
+            return failWithConflict(PROJECT_AND_WORKSPACE_NAME_MISMATCH);
         }
-
         if (ex instanceof ClickHouseException
                 && ex.getMessage().contains("TOO_LARGE_STRING_SIZE")
                 && (ex.getMessage().contains("CAST(leftPad(") && ex.getMessage().contains(".parent_span_id, 40_UInt8")
@@ -211,20 +196,18 @@ public class SpanService {
 
             return failWithConflict(PARENT_SPAN_IS_MISMATCH);
         }
-
         if (ex instanceof ClickHouseException
                 && ex.getMessage().contains("TOO_LARGE_STRING_SIZE")
                 && ex.getMessage().contains("_CAST(trace_id, FixedString(36))")) {
 
             return failWithConflict(TRACE_ID_MISMATCH);
         }
-
         return Mono.error(ex);
     }
 
     private Mono<Long> updateOrFail(SpanUpdate spanUpdate, UUID id, Span existingSpan, Project project) {
         if (!project.id().equals(existingSpan.projectId())) {
-            return failWithConflict(PROJECT_NAME_MISMATCH);
+            return failWithConflict(PROJECT_AND_WORKSPACE_NAME_MISMATCH);
         }
 
         if (!Objects.equals(existingSpan.parentSpanId(), spanUpdate.parentSpanId())) {
@@ -236,12 +219,6 @@ public class SpanService {
         }
 
         return spanDAO.update(id, spanUpdate, existingSpan);
-    }
-
-    private NotFoundException newNotFoundException(UUID id) {
-        String message = "Not found span with id '%s'".formatted(id);
-        log.info(message);
-        return new NotFoundException(message);
     }
 
     private <T> Mono<T> failWithConflict(String error) {
@@ -283,7 +260,11 @@ public class SpanService {
 
     private List<Span> bindSpanToProjectAndId(SpanBatch batch, List<Project> projects) {
         Map<String, Project> projectPerName = projects.stream()
-                .collect(Collectors.toMap(Project::name, Function.identity()));
+                .collect(Collectors.toMap(
+                        Project::name,
+                        Function.identity(),
+                        BinaryOperatorUtils.last(),
+                        () -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER)));
 
         return batch.spans()
                 .stream()
@@ -319,5 +300,42 @@ public class SpanService {
                         }))
                 .flatMap(project -> spanDAO.getStats(criteria.toBuilder().projectId(project.id()).build()))
                 .switchIfEmpty(Mono.just(ProjectStats.empty()));
+    }
+
+    @WithSpan
+    public Flux<Span> search(int limit, SpanSearchCriteria criteria) {
+
+        if (criteria.projectId() != null) {
+            return spanDAO.search(limit, criteria);
+        }
+
+        return findProject(criteria)
+                .flatMap(project -> project.stream().findFirst().map(Mono::just).orElseGet(Mono::empty))
+                .map(project -> criteria.toBuilder().projectId(project.id()).build())
+                .flatMapMany(newCriteria -> spanDAO.search(limit, newCriteria))
+                .switchIfEmpty(Flux.empty());
+    }
+
+    public Mono<Void> deleteByTraceIds(Set<UUID> traceIds) {
+        if (traceIds.isEmpty()) {
+            return Mono.empty();
+        }
+
+        return spanDAO.getSpanIdsForTraces(traceIds)
+                .flatMap(
+                        spanIds -> commentService.deleteByEntityIds(CommentDAO.EntityType.SPAN, new HashSet<>(spanIds)))
+                .then(Mono.defer(() -> spanDAO.deleteByTraceIds(traceIds)))
+                .then();
+    }
+
+    @WithSpan
+    public Mono<SpansCountResponse> countSpansPerWorkspace() {
+        return spanDAO.countSpansPerWorkspace()
+                .collectList()
+                .flatMap(items -> Mono.just(
+                        SpansCountResponse.builder()
+                                .workspacesSpansCount(items)
+                                .build()))
+                .switchIfEmpty(Mono.just(SpansCountResponse.empty()));
     }
 }

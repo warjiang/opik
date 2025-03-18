@@ -1,8 +1,9 @@
+import time
 import pytest
 import uuid
 
 import opik
-from opik import opik_context
+from opik import opik_context, id_helpers
 from opik.api_objects import helpers
 from . import verifiers
 from .conftest import OPIK_E2E_TESTS_PROJECT_NAME
@@ -514,3 +515,143 @@ def test_search_spans__happyflow(opik_client):
     # Verify that the matching trace is returned
     assert len(spans) == 1, "Expected to find 1 matching span"
     assert spans[0].id == matching_span.id, "Expected to find the matching span"
+
+
+def test_copy_traces__happyflow(opik_client):
+    # Log traces
+    unique_identifier = str(uuid.uuid4())[-6:]
+    ID_STORAGE = {}
+
+    project_name = f"e2e-tests-copy-traces-project - {unique_identifier}"
+    for i in range(2):
+        trace = opik_client.trace(
+            name="trace",
+            project_name=project_name,
+            input={"input": f"test input - {i}"},
+            output={"output": f"test output - {i}"},
+            feedback_scores=[
+                {
+                    "name": "score_trace",
+                    "value": i,
+                    "category_name": "category_",
+                    "reason": "reason_",
+                }
+            ],
+            metadata={"value": i},
+            tags=["a", "b"],
+        )
+        ID_STORAGE[f"trace-{i}-id"] = trace.id
+
+        trace.span(
+            name="span - 0",
+            input={"input": f"test input - {i} - 0"},
+        )
+
+        # Sleep so span timestamps are ordered due to uuid7
+        time.sleep(0.001)
+
+        trace.span(
+            name="span - 1",
+            input={"input": f"test input - {i} - 1"},
+        )
+
+    opik_client.flush()
+
+    new_project_name = project_name + "_v2"
+    opik_client.copy_traces(
+        project_name=project_name,
+        destination_project_name=new_project_name,
+    )
+
+    opik_client.flush()
+
+    traces = opik_client.search_traces(project_name=new_project_name)
+    for i, trace in enumerate(reversed(traces)):
+        verifiers.verify_trace(
+            opik_client=opik_client,
+            trace_id=trace.id,
+            name="trace",
+            input={"input": f"test input - {i}"},
+            output={"output": f"test output - {i}"},
+            feedback_scores=[
+                {
+                    "id": trace.id,
+                    "name": "score_trace",
+                    "value": i,
+                    "category_name": "category_",
+                    "reason": "reason_",
+                }
+            ],
+            metadata={"value": i},
+            tags=["a", "b"],
+            project_name=new_project_name,
+        )
+
+        trace_spans = opik_client.search_spans(
+            project_name=new_project_name, trace_id=trace.id
+        )
+        for j, span in enumerate(reversed(trace_spans)):
+            verifiers.verify_span(
+                opik_client=opik_client,
+                span_id=span.id,
+                trace_id=trace.id,
+                name=f"span - {j}",
+                input={"input": f"test input - {i} - {j}"},
+                parent_span_id=span.parent_span_id,
+                project_name=new_project_name,
+            )
+
+
+def test_tracked_function__update_current_span_and_trace_called__happyflow(
+    opik_client,
+):
+    # Setup
+    ID_STORAGE = {}
+    THREAD_ID = id_helpers.generate_id()
+
+    @opik.track
+    def f():
+        opik_context.update_current_span(
+            name="span-name",
+            input={"span-input": "span-input-value"},
+            output={"span-output": "span-output-value"},
+            metadata={"span-metadata-key": "span-metadata-value"},
+            total_cost=0.42,
+        )
+        opik_context.update_current_trace(
+            name="trace-name",
+            input={"trace-input": "trace-input-value"},
+            output={"trace-output": "trace-output-value"},
+            metadata={"trace-metadata-key": "trace-metadata-value"},
+            thread_id=THREAD_ID,
+        )
+        ID_STORAGE["f_span-id"] = opik_context.get_current_span_data().id
+        ID_STORAGE["f_trace-id"] = opik_context.get_current_trace_data().id
+
+    # Call
+    f()
+    opik.flush_tracker()
+
+    # Verify top level span
+    verifiers.verify_span(
+        opik_client=opik_client,
+        span_id=ID_STORAGE["f_span-id"],
+        parent_span_id=None,
+        trace_id=ID_STORAGE["f_trace-id"],
+        project_name=OPIK_E2E_TESTS_PROJECT_NAME,
+        name="span-name",
+        input={"span-input": "span-input-value"},
+        output={"span-output": "span-output-value"},
+        metadata={"span-metadata-key": "span-metadata-value"},
+        total_cost=0.42,
+    )
+
+    verifiers.verify_trace(
+        opik_client=opik_client,
+        trace_id=ID_STORAGE["f_trace-id"],
+        name="trace-name",
+        input={"trace-input": "trace-input-value"},
+        output={"trace-output": "trace-output-value"},
+        metadata={"trace-metadata-key": "trace-metadata-value"},
+        thread_id=THREAD_ID,
+    )

@@ -3,8 +3,10 @@ package com.comet.opik.api.resources.v1.priv;
 import com.comet.opik.api.BatchDelete;
 import com.comet.opik.api.CreatePromptVersion;
 import com.comet.opik.api.Prompt;
+import com.comet.opik.api.PromptType;
 import com.comet.opik.api.PromptVersion;
 import com.comet.opik.api.PromptVersionRetrieve;
+import com.comet.opik.api.ReactServiceErrorResponse;
 import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.resources.utils.AuthTestUtils;
 import com.comet.opik.api.resources.utils.ClickHouseContainerUtils;
@@ -15,9 +17,13 @@ import com.comet.opik.api.resources.utils.RedisContainerUtils;
 import com.comet.opik.api.resources.utils.TestDropwizardAppExtensionUtils;
 import com.comet.opik.api.resources.utils.TestUtils;
 import com.comet.opik.api.resources.utils.WireMockUtils;
+import com.comet.opik.extensions.DropwizardAppExtensionProvider;
+import com.comet.opik.extensions.RegisterApp;
 import com.comet.opik.infrastructure.DatabaseAnalyticsFactory;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.podam.PodamFactoryUtils;
+import com.comet.opik.utils.JsonUtils;
+import com.comet.opik.utils.TemplateParseUtils;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
 import jakarta.ws.rs.client.Entity;
@@ -38,10 +44,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.lifecycle.Startables;
@@ -62,9 +70,11 @@ import java.util.stream.Stream;
 
 import static com.comet.opik.api.resources.utils.ClickHouseContainerUtils.DATABASE_NAME;
 import static com.comet.opik.api.resources.utils.MigrationUtils.CLICKHOUSE_CHANGELOG_FILE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.FAKE_API_KEY_MESSAGE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.NO_API_KEY_RESPONSE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.UNAUTHORIZED_RESPONSE;
 import static com.comet.opik.infrastructure.auth.RequestContext.SESSION_COOKIE;
 import static com.comet.opik.infrastructure.auth.RequestContext.WORKSPACE_HEADER;
-import static com.comet.opik.infrastructure.auth.TestHttpClientUtils.UNAUTHORIZED_RESPONSE;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
@@ -76,9 +86,12 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Prompt Resource Test")
+@ExtendWith(DropwizardAppExtensionProvider.class)
 class PromptResourceTest {
 
     private static final String RESOURCE_PATH = "%s/v1/private/prompts";
+    private final String[] IGNORED_FIELDS = {"latestVersion", "template", "metadata", "changeDescription",
+            "type"};
 
     private static final String API_KEY = UUID.randomUUID().toString();
     private static final String USER = UUID.randomUUID().toString();
@@ -89,13 +102,12 @@ class PromptResourceTest {
     private static final ClickHouseContainer CLICKHOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
     private static final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
 
-    @RegisterExtension
-    private static final TestDropwizardAppExtension app;
+    @RegisterApp
+    private final TestDropwizardAppExtension APP;
 
-    private static final WireMockUtils.WireMockRuntime wireMock;
-    private static final String[] IGNORED_FIELDS = {"latestVersion", "template"};
+    private final WireMockUtils.WireMockRuntime wireMock;
 
-    static {
+    {
         Startables.deepStart(REDIS, CLICKHOUSE_CONTAINER, MYSQL).join();
 
         wireMock = WireMockUtils.startWireMock();
@@ -103,7 +115,7 @@ class PromptResourceTest {
         DatabaseAnalyticsFactory databaseAnalyticsFactory = ClickHouseContainerUtils
                 .newDatabaseAnalyticsFactory(CLICKHOUSE_CONTAINER, DATABASE_NAME);
 
-        app = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
+        APP = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
                 MYSQL.getJdbcUrl(), databaseAnalyticsFactory, wireMock.runtimeInfo(), REDIS.getRedisURI());
     }
 
@@ -118,7 +130,7 @@ class PromptResourceTest {
         MigrationUtils.runDbMigration(jdbi, MySQLContainerUtils.migrationParameters());
 
         try (var connection = CLICKHOUSE_CONTAINER.createConnection("")) {
-            MigrationUtils.runDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
+            MigrationUtils.runClickhouseDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
                     ClickHouseContainerUtils.migrationParameters());
         }
 
@@ -130,7 +142,7 @@ class PromptResourceTest {
         mockTargetWorkspace(API_KEY, TEST_WORKSPACE, WORKSPACE_ID);
     }
 
-    private static void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
+    private void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
         AuthTestUtils.mockTargetWorkspace(wireMock.server(), apiKey, workspaceName, workspaceId, USER);
     }
 
@@ -149,9 +161,9 @@ class PromptResourceTest {
 
         Stream<Arguments> credentials() {
             return Stream.of(
-                    arguments(okApikey, true),
-                    arguments(fakeApikey, false),
-                    arguments("", false));
+                    arguments(okApikey, true, null),
+                    arguments(fakeApikey, false, UNAUTHORIZED_RESPONSE),
+                    arguments("", false, NO_API_KEY_RESPONSE));
         }
 
         @BeforeEach
@@ -161,19 +173,17 @@ class PromptResourceTest {
                     post(urlPathEqualTo("/opik/auth"))
                             .withHeader(HttpHeaders.AUTHORIZATION, equalTo(fakeApikey))
                             .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(WireMock.unauthorized()));
-
-            wireMock.server().stubFor(
-                    post(urlPathEqualTo("/opik/auth"))
-                            .withHeader(HttpHeaders.AUTHORIZATION, equalTo(""))
-                            .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(WireMock.unauthorized()));
+                            .willReturn(WireMock.unauthorized().withHeader("Content-Type", "application/json")
+                                    .withJsonBody(JsonUtils.readTree(
+                                            new ReactServiceErrorResponse(FAKE_API_KEY_MESSAGE,
+                                                    401)))));
         }
 
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("create prompt: when api key is present, then return proper response")
-        void createPrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void createPrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             var prompt = factory.manufacturePojo(Prompt.class);
 
@@ -195,7 +205,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -203,7 +213,8 @@ class PromptResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("find prompt: when api key is present, then return proper response")
-        void findPrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void findPrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             String workspaceName = UUID.randomUUID().toString();
 
@@ -223,7 +234,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -231,7 +242,8 @@ class PromptResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("update prompt: when api key is present, then return proper response")
-        void updatePrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void updatePrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -259,7 +271,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -267,7 +279,8 @@ class PromptResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("delete prompt: when api key is present, then return proper response")
-        void deletePrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void deletePrompt__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -295,7 +308,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -303,7 +316,8 @@ class PromptResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("get prompt by id: when api key is present, then return proper response")
-        void getPromptById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void getPromptById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -331,7 +345,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -339,7 +353,8 @@ class PromptResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Create prompt versions: when api key is present, then return proper response")
-        void createPromptVersions__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void createPromptVersions__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -360,7 +375,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -369,7 +384,7 @@ class PromptResourceTest {
         @MethodSource("credentials")
         @DisplayName("Get prompt versions by prompt id: when api key is present, then return proper response")
         void getPromptVersionsByPromptId__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey,
-                boolean success) {
+                boolean success, io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -398,7 +413,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -406,7 +421,8 @@ class PromptResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Get prompt versions by id: when api key is present, then return proper response")
-        void getPromptVersionsById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success) {
+        void getPromptVersionsById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean success,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -429,7 +445,7 @@ class PromptResourceTest {
             promptVersion = createPromptVersion(request, okApikey, workspaceName);
 
             try (var actualResponse = client
-                    .target(RESOURCE_PATH.formatted(baseURI) + "/%s/versions".formatted(promptVersion.id()))
+                    .target(RESOURCE_PATH.formatted(baseURI) + "/%s/versions".formatted(promptVersion.promptId()))
                     .request()
                     .accept(MediaType.APPLICATION_JSON_TYPE)
                     .header(HttpHeaders.AUTHORIZATION, apiKey)
@@ -443,7 +459,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -452,7 +468,7 @@ class PromptResourceTest {
         @MethodSource("credentials")
         @DisplayName("Retrieve prompt versions by name and commit: when api key is present, then return proper response")
         void retrievePromptVersionsByNameAndCommit__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey,
-                boolean success) {
+                boolean success, io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String workspaceName = UUID.randomUUID().toString();
 
             mockTargetWorkspace(okApikey, workspaceName, WORKSPACE_ID);
@@ -482,7 +498,7 @@ class PromptResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -514,7 +530,10 @@ class PromptResourceTest {
                     post(urlPathEqualTo("/opik/auth-session"))
                             .withCookie(SESSION_COOKIE, equalTo(fakeSessionToken))
                             .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(WireMock.unauthorized()));
+                            .willReturn(WireMock.unauthorized().withHeader("Content-Type", "application/json")
+                                    .withJsonBody(JsonUtils.readTree(
+                                            new ReactServiceErrorResponse(FAKE_API_KEY_MESSAGE,
+                                                    401)))));
         }
 
         @ParameterizedTest
@@ -833,14 +852,16 @@ class PromptResourceTest {
     @TestInstance(TestInstance.Lifecycle.PER_CLASS)
     class CreatePrompt {
 
-        @Test
+        @ParameterizedTest
+        @NullSource
+        @EnumSource(PromptType.class)
         @DisplayName("Success: should create prompt")
-        void shouldCreatePrompt() {
+        void shouldCreatePrompt(PromptType type) {
 
             var prompt = factory.manufacturePojo(Prompt.class).toBuilder()
                     .lastUpdatedBy(USER)
                     .createdBy(USER)
-                    .template(null)
+                    .type(type)
                     .build();
 
             var promptId = createPrompt(prompt, API_KEY, TEST_WORKSPACE);
@@ -1354,14 +1375,17 @@ class PromptResourceTest {
     @TestInstance(TestInstance.Lifecycle.PER_CLASS)
     class GetPromptById {
 
-        @Test
+        @ParameterizedTest
+        @NullSource
+        @EnumSource(PromptType.class)
         @DisplayName("Success: should get prompt by id")
-        void shouldGetPromptById() {
+        void shouldGetPromptById(PromptType type) {
 
             var prompt = factory.manufacturePojo(Prompt.class).toBuilder()
                     .lastUpdatedBy(USER)
                     .createdBy(USER)
                     .versionCount(1L)
+                    .type(type)
                     .build();
 
             UUID promptId = createPrompt(prompt, API_KEY, TEST_WORKSPACE);
@@ -1391,6 +1415,9 @@ class PromptResourceTest {
 
             Prompt expectedPrompt = prompt.toBuilder()
                     .template(promptVersion.template())
+                    .metadata(promptVersion.metadata())
+                    .changeDescription(promptVersion.changeDescription())
+                    .type(promptVersion.type())
                     .versionCount(2L)
                     .build();
 
@@ -1452,6 +1479,9 @@ class PromptResourceTest {
         assertThat(promptVersion.commit())
                 .isEqualTo(promptVersion.id().toString().substring(promptVersion.id().toString().length() - 8));
         assertThat(promptVersion.template()).isEqualTo(expectedPrompt.template());
+        assertThat(promptVersion.metadata()).isEqualTo(expectedPrompt.metadata());
+        assertThat(promptVersion.changeDescription()).isEqualTo(expectedPrompt.changeDescription());
+        assertThat(promptVersion.type()).isEqualTo(expectedPrompt.type());
         assertThat(promptVersion.variables()).isEqualTo(expectedVariables);
         assertThat(promptVersion.createdBy()).isEqualTo(USER);
         assertThat(promptVersion.createdAt()).isBetween(expectedPrompt.createdAt(), Instant.now());
@@ -1820,9 +1850,11 @@ class PromptResourceTest {
     @TestInstance(TestInstance.Lifecycle.PER_CLASS)
     class GetPromptVersionById {
 
-        @Test
+        @ParameterizedTest
+        @NullSource
+        @EnumSource(PromptType.class)
         @DisplayName("Success: should get prompt version by id")
-        void shouldGetPromptVersionById() {
+        void shouldGetPromptVersionById(PromptType type) {
 
             var prompt = factory.manufacturePojo(Prompt.class).toBuilder()
                     .lastUpdatedBy(USER)
@@ -1835,6 +1867,7 @@ class PromptResourceTest {
             var promptVersion = factory.manufacturePojo(PromptVersion.class).toBuilder()
                     .createdBy(USER)
                     .promptId(promptId)
+                    .type(type)
                     .build();
 
             var request = new CreatePromptVersion(prompt.name(), promptVersion);
@@ -2168,7 +2201,8 @@ class PromptResourceTest {
 
         assertThat(createdPromptVersion.promptId()).isEqualTo(promptId);
         assertThat(createdPromptVersion.template()).isEqualTo(promptVersion.template());
-        assertThat(createdPromptVersion.variables()).isEqualTo(promptVersion.variables());
+        assertThat(createdPromptVersion.variables())
+                .isEqualTo(TemplateParseUtils.extractVariables(promptVersion.template(), promptVersion.type()));
         assertThat(createdPromptVersion.createdAt()).isBetween(promptVersion.createdAt(), Instant.now());
         assertThat(createdPromptVersion.createdBy()).isEqualTo(USER);
     }

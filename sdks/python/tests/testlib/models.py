@@ -29,6 +29,7 @@ class SpanModel:
     model: Optional[str] = None
     provider: Optional[str] = None
     error_info: Optional[ErrorInfoDict] = None
+    total_cost: Optional[float] = None
 
 
 @dataclasses.dataclass
@@ -50,6 +51,7 @@ class TraceModel:
         default_factory=list
     )
     error_info: Optional[ErrorInfoDict] = None
+    thread_id: Optional[str] = None
 
 
 @dataclasses.dataclass

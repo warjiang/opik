@@ -1,9 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import get from "lodash/get";
-import api, { PROJECTS_REST_ENDPOINT } from "@/api/api";
+import api, {
+  PROJECT_STATISTICS_KEY,
+  PROJECTS_KEY,
+  PROJECTS_REST_ENDPOINT,
+} from "@/api/api";
 import { Project } from "@/types/projects";
 import { AxiosError } from "axios";
 import { useToast } from "@/components/ui/use-toast";
+import { extractIdFromLocation } from "@/lib/utils";
 
 type UseProjectCreateMutationParams = {
   project: Partial<Project>;
@@ -15,10 +20,14 @@ const useProjectCreateMutation = () => {
 
   return useMutation({
     mutationFn: async ({ project }: UseProjectCreateMutationParams) => {
-      const { data } = await api.post(PROJECTS_REST_ENDPOINT, {
+      const { headers } = await api.post(PROJECTS_REST_ENDPOINT, {
         ...project,
       });
-      return data;
+
+      // TODO workaround to return just created resource while implementation on BE is not done
+      const id = extractIdFromLocation(headers?.location);
+
+      return { id };
     },
     onError: (error: AxiosError) => {
       const message = get(
@@ -34,8 +43,11 @@ const useProjectCreateMutation = () => {
       });
     },
     onSettled: () => {
-      return queryClient.invalidateQueries({
-        queryKey: ["projects"],
+      queryClient.invalidateQueries({
+        queryKey: [PROJECT_STATISTICS_KEY],
+      });
+      queryClient.invalidateQueries({
+        queryKey: [PROJECTS_KEY],
       });
     },
   });

@@ -114,9 +114,14 @@ distributedLock:
 
 # Redis configuration
 redis:
-  # Default:
+  # Default: redis://:opik@localhost:6379/0
   # Description: single node redis's URL
-  singleNodeUrl: ${REDIS_URL:-}
+  singleNodeUrl: ${REDIS_URL:-redis://:opik@localhost:6379/0}
+
+openTelemetry:
+  # Default: 3h
+  # Description: how long it takes to expire non-used keys
+  ttl: ${OTEL_TTL_INTERVAL:-3h}
 
 # Authentication configuration. This is not enabled by default for open source installations.
 authentication:
@@ -170,6 +175,42 @@ rateLimit:
     # Default: 60
     # Description: Time bucket size in seconds
     durationInSeconds: ${RATE_LIMIT_GENERAL_EVENTS_DURATION_IN_SEC:-60}
+    # Description: Header name to use for rate limiting
+    headerName: User
+    # Description: User facing bucket name
+    userFacingBucketName: general_events
+    # Description: Rate limit error message
+    errorMessage: "You have exceeded the general rate limit for this user. Please try again later."
+
+  workspaceLimit:
+    # Default: 5000
+    # Description: how many events per workspace are allowed in the specified time bucket
+    limit: ${RATE_LIMIT_WORKSPACE_EVENTS_LIMIT:-5000}
+    # Default: 60
+    # Description: Time bucket size in seconds
+    durationInSeconds: ${RATE_LIMIT_WORKSPACE_EVENTS_DURATION_IN_SEC:-60}
+    # Description: Header name to use for rate limiting
+    headerName: Workspace
+    # Description: User facing bucket name
+    userFacingBucketName: workspace_events
+    # Description: Rate limit error message
+    errorMessage: "You have exceeded the rate limit for this user in this workspace. Please try again later."
+
+  customLimits:
+    getSpanById:
+      # Default: 250
+      # Description: how many events are allowed in the specified time bucket
+      limit: ${RATE_LIMIT_GET_SPANS_BY_ID_EVENTS_PER_WORKSPACE_LIMIT:-250}
+      # Default: 60
+      # Description: Time bucket size in seconds
+      durationInSeconds: ${RATE_LIMIT_WORKSPACE_EVENTS_DURATION_IN_SEC:-60}
+      # Description: Header name to use for rate limiting
+      headerName: Get-Span-Id
+      # Description: User facing bucket name
+      userFacingBucketName: get_span_by_id
+      # Description: Rate limit error message
+      errorMessage: "You have exceeded the rate limit for this operation Please try again later."
+
 
 # Configuration for anonymous usage reporting
 usageReport:
@@ -198,6 +239,25 @@ encryption:
   # Description: Encryption key to use when storing sensitive information
   key: ${OPIK_ENCRYPTION_KEY:-'GiTHubiLoVeYouAA'}
 
+# Configuration for Online Scoring
+onlineScoring:
+  # Default: 500 ms
+  # Description: How often Online Scoring will check Redis for new messages (in milliseconds)
+  poolingInterval: ${REDIS_SCORING_CONSUMER_POOL_INTERVAL:-500ms}
+  # Default: online_scoring
+  # Description: A consumer group name so multiple instances can share the stream load
+  consumerGroupName: ${REDIS_SCORING_CONSUMER_GROUP_NAME:-'online_scoring'}
+  # Default: 5
+  # Description: Maximum number of messages returned within a Redis Stream get
+  consumerBatchSize: ${REDIS_SCORING_CONSUMER_BATCH_SIZE:-5}
+  ## scorer: options from AutomationRuleEvaluatorType
+  ## streamName: the name of the stream in redis
+  ## codec: 'json' when there are non-java consumers, 'java' for java consumers only
+  streams:
+    - scorer: llm_as_judge
+      streamName: stream_scoring_llm_as_judge
+      codec: java
+
 # LLM providers client configuration
 llmProviderClient:
   # Default: 3
@@ -224,8 +284,66 @@ llmProviderClient:
   # Default: 60s
   # Description: Write timeout for LLM providers
   writeTimeout: ${LLM_PROVIDER_CLIENT_WRITE_TIMEOUT:-60s}
+  # Default: false
+  # Description: Whether or not to log requests
+  logRequests: ${LLM_PROVIDER_CLIENT_LOG_REQUESTS:-false}
+  # Default: false
+  # Description: Whether or not to log responses
+  logResponses: ${LLM_PROVIDER_CLIENT_LOG_RESPONSES:-false}
   # Configuration for OpenAI client
   openAiClient:
     # Default:
     # Description: OpenAI API URL
     url: ${LLM_PROVIDER_OPENAI_URL:-}
+  # Configuration for Anthropic client
+  anthropicClient:
+    # Default: https://api.anthropic.com/v1/
+    # Description: Anthropic API URL
+    url: ${LLM_PROVIDER_ANTHROPIC_URL:-https://api.anthropic.com/v1/}
+    # Default: 2023-06-01
+    # Description: Anthropic API version https://docs.anthropic.com/en/api/versioning
+    version: ${LLM_PROVIDER_ANTHROPIC_VERSION:-'2023-06-01'}
+  # Default: https://openrouter.ai/api/v1
+  # Description: OpenRouter API URL
+  openRouterUrl: ${LLM_PROVIDER_OPENROUTER_URL:-https://openrouter.ai/api/v1}
+
+# Configuration for cache manager
+cacheManager:
+    # Default: true
+    # Description: Whether or not cache manager is enabled
+    enabled: ${CACHE_MANAGER_ENABLED:-true}
+    # Default: PT1S
+    # Description: Time to live for cache entries in using the formats accepted are based on the ISO-8601: https://docs.oracle.com/javase/8/docs/api/java/time/Duration.html#parse-java.lang.CharSequence-
+    defaultDuration: ${CACHE_MANAGER_DEFAULT_DURATION:-PT1S}
+    caches:
+      # Default: {}
+      # Description: Dynamically created caches with their respective time to live in seconds
+      automationRules: ${CACHE_MANAGER_AUTOMATION_RULES_DURATION:-PT1S}
+      workspace_metadata: ${CACHE_MANAGER_WORKSPACE_METADATA_DURATION:-PT1H}
+
+# Configuration for clickhouse log appender
+clickHouseLogAppender:
+  # Default: 1000
+  # Description: Number of log messages to be batched before sending to ClickHouse
+  batchSize: ${CLICKHOUSE_LOG_APPENDER_BATCH_SIZE:-1000}
+
+  # Default: PT0.500S or 500ms
+  # Description: Time interval after which the log messages are sent to ClickHouse if the batch size is not reached
+  flushIntervalDuration: ${CLICKHOUSE_LOG_APPENDER_FLUSH_INTERVAL_DURATION:-PT0.500S}
+
+workspaceSettings:
+  # Default: 50
+  # Description: Maximum size of a workspace in GB to allow dynamic sorting. This value is calculated via estimated size based on spans table
+    maxSizeToAllowSorting: ${WORKSPACE_SETTINGS_MAX_SIZE_IN_GB_TO_ALLOW_SORTING:-50}
+
+# Configuration AWS S3
+s3Config:
+  s3Region: ${S3_REGION:-'us-east-1'}
+  # Description: AWS S3 bucket for Opik
+  s3BucketName: ${S3_BUCKET:-'public'}
+  # Description: AWS S3 presign url timeout
+  preSignUrlTimeoutSec: ${S3_PRESIGN_URL_TIMEOUT:-3600}
+  # Description: Url for local MinIO or Aws
+  s3Url: ${S3_URL:-http://localhost:9000}
+  # Description: Whether installation uses MinIO or AWS S3
+  isMinIO: ${IS_MINIO:-true}

@@ -7,12 +7,18 @@ export type DropdownOption<TDataType> = {
   value: TDataType;
   label: string;
   description?: string;
+  tooltip?: string;
+  disabled?: boolean;
 };
 
 export const COLUMN_ID_ID = "id";
 export const COLUMN_SELECT_ID = "select";
 export const COLUMN_NAME_ID = "name";
 export const COLUMN_ACTIONS_ID = "actions";
+export const COLUMN_METADATA_ID = "metadata";
+export const COLUMN_FEEDBACK_SCORES_ID = "feedback_scores";
+export const COLUMN_COMMENTS_ID = "comments";
+export const COLUMN_CREATED_AT_ID = "created_at";
 
 export enum COLUMN_TYPE {
   string = "string",
@@ -38,7 +44,7 @@ export type ColumnData<T> = {
   id: string;
   label: string;
   disabled?: boolean;
-  accessorFn?: (row: T) => string | object;
+  accessorFn?: (row: T) => string | number | object | undefined;
   size?: number;
   type?: COLUMN_TYPE;
   customMeta?: object;
@@ -117,3 +123,14 @@ export type JsonNode =
 export type UsageType = {
   [key: string]: number | UsageType;
 };
+
+export interface UsageData {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+}
+
+export interface AverageFeedbackScore {
+  name: string;
+  value: number;
+}

@@ -2,12 +2,12 @@
 
 import typing
 from ..core.client_wrapper import SyncClientWrapper
-from ..types.feedback_score_source import FeedbackScoreSource
 import datetime as dt
 from ..core.request_options import RequestOptions
 from ..core.jsonable_encoder import jsonable_encoder
 from json.decoder import JSONDecodeError
 from ..core.api_error import ApiError
+from ..types.feedback_score_source import FeedbackScoreSource
 from ..types.trace_page_public import TracePagePublic
 from ..core.pydantic_utilities import parse_obj_as
 from ..types.json_node_write import JsonNodeWrite
@@ -18,6 +18,10 @@ from ..types.trace_public import TracePublic
 from ..types.json_node import JsonNode
 from ..types.error_info import ErrorInfo
 from ..types.project_stats_public import ProjectStatsPublic
+from ..types.comment import Comment
+from ..errors.not_found_error import NotFoundError
+from ..types.trace_thread import TraceThread
+from ..types.trace_thread_page import TraceThreadPage
 from ..types.feedback_score_batch_item import FeedbackScoreBatchItem
 from ..core.client_wrapper import AsyncClientWrapper
 
@@ -28,6 +32,79 @@ OMIT = typing.cast(typing.Any, ...)
 class TracesClient:
     def __init__(self, *, client_wrapper: SyncClientWrapper):
         self._client_wrapper = client_wrapper
+
+    def add_trace_comment(
+        self,
+        id_: str,
+        *,
+        text: str,
+        id: typing.Optional[str] = OMIT,
+        created_at: typing.Optional[dt.datetime] = OMIT,
+        last_updated_at: typing.Optional[dt.datetime] = OMIT,
+        created_by: typing.Optional[str] = OMIT,
+        last_updated_by: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Add trace comment
+
+        Parameters
+        ----------
+        id_ : str
+
+        text : str
+
+        id : typing.Optional[str]
+
+        created_at : typing.Optional[dt.datetime]
+
+        last_updated_at : typing.Optional[dt.datetime]
+
+        created_by : typing.Optional[str]
+
+        last_updated_by : typing.Optional[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.add_trace_comment(
+            id_="id",
+            text="text",
+        )
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            f"v1/private/traces/{jsonable_encoder(id_)}/comments",
+            method="POST",
+            json={
+                "id": id,
+                "text": text,
+                "created_at": created_at,
+                "last_updated_at": last_updated_at,
+                "created_by": created_by,
+                "last_updated_by": last_updated_by,
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
 
     def add_trace_feedback_score(
         self,
@@ -80,7 +157,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.add_trace_feedback_score(
             id="id",
             name="name",
@@ -122,6 +202,7 @@ class TracesClient:
         project_id: typing.Optional[str] = None,
         filters: typing.Optional[str] = None,
         truncate: typing.Optional[bool] = None,
+        sorting: typing.Optional[str] = None,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> TracePagePublic:
         """
@@ -141,6 +222,8 @@ class TracesClient:
 
         truncate : typing.Optional[bool]
 
+        sorting : typing.Optional[str]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -153,7 +236,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.get_traces_by_project()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -166,6 +252,7 @@ class TracesClient:
                 "project_id": project_id,
                 "filters": filters,
                 "truncate": truncate,
+                "sorting": sorting,
             },
             request_options=request_options,
         )
@@ -196,6 +283,7 @@ class TracesClient:
         metadata: typing.Optional[JsonNodeWrite] = OMIT,
         tags: typing.Optional[typing.Sequence[str]] = OMIT,
         error_info: typing.Optional[ErrorInfoWrite] = OMIT,
+        thread_id: typing.Optional[str] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -224,6 +312,8 @@ class TracesClient:
 
         error_info : typing.Optional[ErrorInfoWrite]
 
+        thread_id : typing.Optional[str]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -237,7 +327,10 @@ class TracesClient:
 
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.create_trace(
             name="name",
             start_time=datetime.datetime.fromisoformat(
@@ -261,6 +354,7 @@ class TracesClient:
                 "error_info": convert_and_respect_annotation_metadata(
                     object_=error_info, annotation=ErrorInfoWrite, direction="write"
                 ),
+                "thread_id": thread_id,
             },
             request_options=request_options,
             omit=OMIT,
@@ -299,7 +393,10 @@ class TracesClient:
 
         from Opik import OpikApi, TraceWrite
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.create_traces(
             traces=[
                 TraceWrite(
@@ -357,7 +454,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.get_trace_by_id(
             id="id",
         )
@@ -402,7 +502,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.delete_trace_by_id(
             id="id",
         )
@@ -432,6 +535,7 @@ class TracesClient:
         metadata: typing.Optional[JsonNode] = OMIT,
         tags: typing.Optional[typing.Sequence[str]] = OMIT,
         error_info: typing.Optional[ErrorInfo] = OMIT,
+        thread_id: typing.Optional[str] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -459,6 +563,8 @@ class TracesClient:
 
         error_info : typing.Optional[ErrorInfo]
 
+        thread_id : typing.Optional[str]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -470,7 +576,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.update_trace(
             id="id",
         )
@@ -489,9 +598,59 @@ class TracesClient:
                 "error_info": convert_and_respect_annotation_metadata(
                     object_=error_info, annotation=ErrorInfo, direction="write"
                 ),
+                "thread_id": thread_id,
             },
             headers={
                 "content-type": "application/json",
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    def delete_trace_comments(
+        self,
+        *,
+        ids: typing.Sequence[str],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Delete trace comments
+
+        Parameters
+        ----------
+        ids : typing.Sequence[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.delete_trace_comments(
+            ids=["ids"],
+        )
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            "v1/private/traces/comments/delete",
+            method="POST",
+            json={
+                "ids": ids,
             },
             request_options=request_options,
             omit=OMIT,
@@ -531,7 +690,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.delete_trace_feedback_score(
             id="id",
             name="name",
@@ -542,6 +704,68 @@ class TracesClient:
             method="POST",
             json={
                 "name": name,
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    def delete_trace_threads(
+        self,
+        *,
+        thread_ids: typing.Sequence[str],
+        project_name: typing.Optional[str] = OMIT,
+        project_id: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Delete trace threads
+
+        Parameters
+        ----------
+        thread_ids : typing.Sequence[str]
+
+        project_name : typing.Optional[str]
+            If null, project_id must be provided
+
+        project_id : typing.Optional[str]
+            If null, project_name must be provided
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.delete_trace_threads(
+            thread_ids=["thread_ids"],
+        )
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            "v1/private/traces/threads/delete",
+            method="POST",
+            json={
+                "project_name": project_name,
+                "project_id": project_id,
+                "thread_ids": thread_ids,
+            },
+            headers={
+                "content-type": "application/json",
             },
             request_options=request_options,
             omit=OMIT,
@@ -578,7 +802,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.delete_traces(
             ids=["ids"],
         )
@@ -625,7 +852,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.find_feedback_score_names_2()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -681,7 +911,10 @@ class TracesClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.get_trace_stats()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -700,6 +933,219 @@ class TracesClient:
                     ProjectStatsPublic,
                     parse_obj_as(
                         type_=ProjectStatsPublic,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    def get_trace_comment(
+        self,
+        comment_id: str,
+        trace_id: str,
+        *,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> Comment:
+        """
+        Get trace comment
+
+        Parameters
+        ----------
+        comment_id : str
+
+        trace_id : str
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        Comment
+            Comment resource
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.get_trace_comment(
+            comment_id="commentId",
+            trace_id="traceId",
+        )
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            f"v1/private/traces/{jsonable_encoder(trace_id)}/comments/{jsonable_encoder(comment_id)}",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    Comment,
+                    parse_obj_as(
+                        type_=Comment,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    def get_trace_thread(
+        self,
+        *,
+        project_id: str,
+        thread_id: str,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> TraceThread:
+        """
+        Get trace thread
+
+        Parameters
+        ----------
+        project_id : str
+
+        thread_id : str
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        TraceThread
+            Trace thread resource
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.get_trace_thread(
+            project_id="project_id",
+            thread_id="thread_id",
+        )
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            "v1/private/traces/threads/retrieve",
+            method="POST",
+            json={
+                "project_id": project_id,
+                "thread_id": thread_id,
+            },
+            headers={
+                "content-type": "application/json",
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    TraceThread,
+                    parse_obj_as(
+                        type_=TraceThread,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    def get_trace_threads(
+        self,
+        *,
+        page: typing.Optional[int] = None,
+        size: typing.Optional[int] = None,
+        project_name: typing.Optional[str] = None,
+        project_id: typing.Optional[str] = None,
+        truncate: typing.Optional[bool] = None,
+        filters: typing.Optional[str] = None,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> TraceThreadPage:
+        """
+        Get trace threads
+
+        Parameters
+        ----------
+        page : typing.Optional[int]
+
+        size : typing.Optional[int]
+
+        project_name : typing.Optional[str]
+
+        project_id : typing.Optional[str]
+
+        truncate : typing.Optional[bool]
+
+        filters : typing.Optional[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        TraceThreadPage
+            Trace threads resource
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.get_trace_threads()
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            "v1/private/traces/threads",
+            method="GET",
+            params={
+                "page": page,
+                "size": size,
+                "project_name": project_name,
+                "project_id": project_id,
+                "truncate": truncate,
+                "filters": filters,
+            },
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    TraceThreadPage,
+                    parse_obj_as(
+                        type_=TraceThreadPage,  # type: ignore
                         object_=_response.json(),
                     ),
                 )
@@ -732,7 +1178,10 @@ class TracesClient:
         --------
         from Opik import FeedbackScoreBatchItem, OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.traces.score_batch_of_traces(
             scores=[
                 FeedbackScoreBatchItem(
@@ -765,10 +1214,174 @@ class TracesClient:
             raise ApiError(status_code=_response.status_code, body=_response.text)
         raise ApiError(status_code=_response.status_code, body=_response_json)
 
+    def update_trace_comment(
+        self,
+        comment_id: str,
+        *,
+        text: str,
+        id: typing.Optional[str] = OMIT,
+        created_at: typing.Optional[dt.datetime] = OMIT,
+        last_updated_at: typing.Optional[dt.datetime] = OMIT,
+        created_by: typing.Optional[str] = OMIT,
+        last_updated_by: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Update trace comment by id
+
+        Parameters
+        ----------
+        comment_id : str
+
+        text : str
+
+        id : typing.Optional[str]
+
+        created_at : typing.Optional[dt.datetime]
+
+        last_updated_at : typing.Optional[dt.datetime]
+
+        created_by : typing.Optional[str]
+
+        last_updated_by : typing.Optional[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.traces.update_trace_comment(
+            comment_id="commentId",
+            text="text",
+        )
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            f"v1/private/traces/comments/{jsonable_encoder(comment_id)}",
+            method="PATCH",
+            json={
+                "id": id,
+                "text": text,
+                "created_at": created_at,
+                "last_updated_at": last_updated_at,
+                "created_by": created_by,
+                "last_updated_by": last_updated_by,
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
 
 class AsyncTracesClient:
     def __init__(self, *, client_wrapper: AsyncClientWrapper):
         self._client_wrapper = client_wrapper
+
+    async def add_trace_comment(
+        self,
+        id_: str,
+        *,
+        text: str,
+        id: typing.Optional[str] = OMIT,
+        created_at: typing.Optional[dt.datetime] = OMIT,
+        last_updated_at: typing.Optional[dt.datetime] = OMIT,
+        created_by: typing.Optional[str] = OMIT,
+        last_updated_by: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Add trace comment
+
+        Parameters
+        ----------
+        id_ : str
+
+        text : str
+
+        id : typing.Optional[str]
+
+        created_at : typing.Optional[dt.datetime]
+
+        last_updated_at : typing.Optional[dt.datetime]
+
+        created_by : typing.Optional[str]
+
+        last_updated_by : typing.Optional[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.add_trace_comment(
+                id_="id",
+                text="text",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            f"v1/private/traces/{jsonable_encoder(id_)}/comments",
+            method="POST",
+            json={
+                "id": id,
+                "text": text,
+                "created_at": created_at,
+                "last_updated_at": last_updated_at,
+                "created_by": created_by,
+                "last_updated_by": last_updated_by,
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
 
     async def add_trace_feedback_score(
         self,
@@ -823,7 +1436,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -871,6 +1487,7 @@ class AsyncTracesClient:
         project_id: typing.Optional[str] = None,
         filters: typing.Optional[str] = None,
         truncate: typing.Optional[bool] = None,
+        sorting: typing.Optional[str] = None,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> TracePagePublic:
         """
@@ -890,6 +1507,8 @@ class AsyncTracesClient:
 
         truncate : typing.Optional[bool]
 
+        sorting : typing.Optional[str]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -904,7 +1523,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -923,6 +1545,7 @@ class AsyncTracesClient:
                 "project_id": project_id,
                 "filters": filters,
                 "truncate": truncate,
+                "sorting": sorting,
             },
             request_options=request_options,
         )
@@ -953,6 +1576,7 @@ class AsyncTracesClient:
         metadata: typing.Optional[JsonNodeWrite] = OMIT,
         tags: typing.Optional[typing.Sequence[str]] = OMIT,
         error_info: typing.Optional[ErrorInfoWrite] = OMIT,
+        thread_id: typing.Optional[str] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -981,6 +1605,8 @@ class AsyncTracesClient:
 
         error_info : typing.Optional[ErrorInfoWrite]
 
+        thread_id : typing.Optional[str]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -995,7 +1621,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1025,6 +1654,7 @@ class AsyncTracesClient:
                 "error_info": convert_and_respect_annotation_metadata(
                     object_=error_info, annotation=ErrorInfoWrite, direction="write"
                 ),
+                "thread_id": thread_id,
             },
             request_options=request_options,
             omit=OMIT,
@@ -1064,7 +1694,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi, TraceWrite
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1130,7 +1763,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1183,7 +1819,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1219,6 +1858,7 @@ class AsyncTracesClient:
         metadata: typing.Optional[JsonNode] = OMIT,
         tags: typing.Optional[typing.Sequence[str]] = OMIT,
         error_info: typing.Optional[ErrorInfo] = OMIT,
+        thread_id: typing.Optional[str] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -1246,6 +1886,8 @@ class AsyncTracesClient:
 
         error_info : typing.Optional[ErrorInfo]
 
+        thread_id : typing.Optional[str]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -1259,7 +1901,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1284,9 +1929,67 @@ class AsyncTracesClient:
                 "error_info": convert_and_respect_annotation_metadata(
                     object_=error_info, annotation=ErrorInfo, direction="write"
                 ),
+                "thread_id": thread_id,
             },
             headers={
                 "content-type": "application/json",
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def delete_trace_comments(
+        self,
+        *,
+        ids: typing.Sequence[str],
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Delete trace comments
+
+        Parameters
+        ----------
+        ids : typing.Sequence[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.delete_trace_comments(
+                ids=["ids"],
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            "v1/private/traces/comments/delete",
+            method="POST",
+            json={
+                "ids": ids,
             },
             request_options=request_options,
             omit=OMIT,
@@ -1328,7 +2031,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1345,6 +2051,76 @@ class AsyncTracesClient:
             method="POST",
             json={
                 "name": name,
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def delete_trace_threads(
+        self,
+        *,
+        thread_ids: typing.Sequence[str],
+        project_name: typing.Optional[str] = OMIT,
+        project_id: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Delete trace threads
+
+        Parameters
+        ----------
+        thread_ids : typing.Sequence[str]
+
+        project_name : typing.Optional[str]
+            If null, project_id must be provided
+
+        project_id : typing.Optional[str]
+            If null, project_name must be provided
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.delete_trace_threads(
+                thread_ids=["thread_ids"],
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            "v1/private/traces/threads/delete",
+            method="POST",
+            json={
+                "project_name": project_name,
+                "project_id": project_id,
+                "thread_ids": thread_ids,
+            },
+            headers={
+                "content-type": "application/json",
             },
             request_options=request_options,
             omit=OMIT,
@@ -1383,7 +2159,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1438,7 +2217,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1502,7 +2284,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1527,6 +2312,243 @@ class AsyncTracesClient:
                     ProjectStatsPublic,
                     parse_obj_as(
                         type_=ProjectStatsPublic,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def get_trace_comment(
+        self,
+        comment_id: str,
+        trace_id: str,
+        *,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> Comment:
+        """
+        Get trace comment
+
+        Parameters
+        ----------
+        comment_id : str
+
+        trace_id : str
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        Comment
+            Comment resource
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.get_trace_comment(
+                comment_id="commentId",
+                trace_id="traceId",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            f"v1/private/traces/{jsonable_encoder(trace_id)}/comments/{jsonable_encoder(comment_id)}",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    Comment,
+                    parse_obj_as(
+                        type_=Comment,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def get_trace_thread(
+        self,
+        *,
+        project_id: str,
+        thread_id: str,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> TraceThread:
+        """
+        Get trace thread
+
+        Parameters
+        ----------
+        project_id : str
+
+        thread_id : str
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        TraceThread
+            Trace thread resource
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.get_trace_thread(
+                project_id="project_id",
+                thread_id="thread_id",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            "v1/private/traces/threads/retrieve",
+            method="POST",
+            json={
+                "project_id": project_id,
+                "thread_id": thread_id,
+            },
+            headers={
+                "content-type": "application/json",
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    TraceThread,
+                    parse_obj_as(
+                        type_=TraceThread,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def get_trace_threads(
+        self,
+        *,
+        page: typing.Optional[int] = None,
+        size: typing.Optional[int] = None,
+        project_name: typing.Optional[str] = None,
+        project_id: typing.Optional[str] = None,
+        truncate: typing.Optional[bool] = None,
+        filters: typing.Optional[str] = None,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> TraceThreadPage:
+        """
+        Get trace threads
+
+        Parameters
+        ----------
+        page : typing.Optional[int]
+
+        size : typing.Optional[int]
+
+        project_name : typing.Optional[str]
+
+        project_id : typing.Optional[str]
+
+        truncate : typing.Optional[bool]
+
+        filters : typing.Optional[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        TraceThreadPage
+            Trace threads resource
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.get_trace_threads()
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            "v1/private/traces/threads",
+            method="GET",
+            params={
+                "page": page,
+                "size": size,
+                "project_name": project_name,
+                "project_id": project_id,
+                "truncate": truncate,
+                "filters": filters,
+            },
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    TraceThreadPage,
+                    parse_obj_as(
+                        type_=TraceThreadPage,  # type: ignore
                         object_=_response.json(),
                     ),
                 )
@@ -1561,7 +2583,10 @@ class AsyncTracesClient:
 
         from Opik import AsyncOpikApi, FeedbackScoreBatchItem
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1595,6 +2620,97 @@ class AsyncTracesClient:
         try:
             if 200 <= _response.status_code < 300:
                 return
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def update_trace_comment(
+        self,
+        comment_id: str,
+        *,
+        text: str,
+        id: typing.Optional[str] = OMIT,
+        created_at: typing.Optional[dt.datetime] = OMIT,
+        last_updated_at: typing.Optional[dt.datetime] = OMIT,
+        created_by: typing.Optional[str] = OMIT,
+        last_updated_by: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
+    ) -> None:
+        """
+        Update trace comment by id
+
+        Parameters
+        ----------
+        comment_id : str
+
+        text : str
+
+        id : typing.Optional[str]
+
+        created_at : typing.Optional[dt.datetime]
+
+        last_updated_at : typing.Optional[dt.datetime]
+
+        created_by : typing.Optional[str]
+
+        last_updated_by : typing.Optional[str]
+
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        None
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.traces.update_trace_comment(
+                comment_id="commentId",
+                text="text",
+            )
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            f"v1/private/traces/comments/{jsonable_encoder(comment_id)}",
+            method="PATCH",
+            json={
+                "id": id,
+                "text": text,
+                "created_at": created_at,
+                "last_updated_at": last_updated_at,
+                "created_by": created_by,
+                "last_updated_by": last_updated_by,
+            },
+            request_options=request_options,
+            omit=OMIT,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return
+            if _response.status_code == 404:
+                raise NotFoundError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
             _response_json = _response.json()
         except JSONDecodeError:
             raise ApiError(status_code=_response.status_code, body=_response.text)

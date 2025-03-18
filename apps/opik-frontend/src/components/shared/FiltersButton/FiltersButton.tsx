@@ -10,18 +10,26 @@ import { Button } from "@/components/ui/button";
 import { Filter, Filters } from "@/types/filters";
 import { ColumnData } from "@/types/shared";
 import { createEmptyFilter, isFilterValid } from "@/lib/filters";
-import FilterRow from "@/components/shared/FiltersButton/FilterRow";
+import FilterRow, {
+  FilterRowConfig,
+} from "@/components/shared/FiltersButton/FilterRow";
 import useDeepMemo from "@/hooks/useDeepMemo";
 import { Separator } from "@/components/ui/separator";
 
+type FilterButtonConfig = {
+  rowsMap: Record<string, FilterRowConfig>;
+};
+
 type FiltersButtonProps<TColumnData> = {
   columns: ColumnData<TColumnData>[];
+  config?: FilterButtonConfig;
   filters: Filters;
   onChange: (filters: Filters) => void;
 };
 
 const FiltersButton = <TColumnData,>({
   filters: initialFilters,
+  config,
   columns,
   onChange,
 }: FiltersButtonProps<TColumnData>) => {
@@ -72,6 +80,7 @@ const FiltersButton = <TColumnData,>({
         <FilterRow
           key={filter.id}
           columns={columns}
+          config={config?.rowsMap[filter.field]}
           filter={filter}
           prefix={prefix}
           onRemove={onRemoveRow}
@@ -84,8 +93,11 @@ const FiltersButton = <TColumnData,>({
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
-        <Button variant="secondary">
-          <FilterIcon className="mr-2 size-4" />
+        <Button variant="secondary" size="sm">
+          <FilterIcon
+            className="mr-2 size-3.5
+          "
+          />
           Filters
           {` (${validFilters.length})`}
         </Button>

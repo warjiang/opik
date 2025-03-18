@@ -15,6 +15,7 @@ from ..core.serialization import convert_and_respect_annotation_metadata
 from ..types.feedback_public import FeedbackPublic
 from ..core.jsonable_encoder import jsonable_encoder
 from ..types.feedback_update import FeedbackUpdate
+from ..errors.conflict_error import ConflictError
 from ..core.client_wrapper import AsyncClientWrapper
 
 # this is used as the default value for optional parameters
@@ -59,7 +60,10 @@ class FeedbackDefinitionsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.feedback_definitions.find_feedback_definitions()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -111,7 +115,10 @@ class FeedbackDefinitionsClient:
         --------
         from Opik import FeedbackCreate_Categorical, OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.feedback_definitions.create_feedback_definition(
             request=FeedbackCreate_Categorical(),
         )
@@ -155,7 +162,10 @@ class FeedbackDefinitionsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.feedback_definitions.get_feedback_definition_by_id(
             id="id",
         )
@@ -206,7 +216,10 @@ class FeedbackDefinitionsClient:
         --------
         from Opik import FeedbackUpdate_Categorical, OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.feedback_definitions.update_feedback_definition(
             id="id",
             request=FeedbackUpdate_Categorical(),
@@ -250,7 +263,10 @@ class FeedbackDefinitionsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.feedback_definitions.delete_feedback_definition_by_id(
             id="id",
         )
@@ -263,6 +279,16 @@ class FeedbackDefinitionsClient:
         try:
             if 200 <= _response.status_code < 300:
                 return
+            if _response.status_code == 409:
+                raise ConflictError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
             _response_json = _response.json()
         except JSONDecodeError:
             raise ApiError(status_code=_response.status_code, body=_response.text)
@@ -292,7 +318,10 @@ class FeedbackDefinitionsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.feedback_definitions.delete_feedback_definitions_batch(
             ids=["ids"],
         )
@@ -309,6 +338,16 @@ class FeedbackDefinitionsClient:
         try:
             if 200 <= _response.status_code < 300:
                 return
+            if _response.status_code == 409:
+                raise ConflictError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
             _response_json = _response.json()
         except JSONDecodeError:
             raise ApiError(status_code=_response.status_code, body=_response.text)
@@ -355,7 +394,10 @@ class AsyncFeedbackDefinitionsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -415,7 +457,10 @@ class AsyncFeedbackDefinitionsClient:
 
         from Opik import AsyncOpikApi, FeedbackCreate_Categorical
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -467,7 +512,10 @@ class AsyncFeedbackDefinitionsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -526,7 +574,10 @@ class AsyncFeedbackDefinitionsClient:
 
         from Opik import AsyncOpikApi, FeedbackUpdate_Categorical
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -578,7 +629,10 @@ class AsyncFeedbackDefinitionsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -597,6 +651,16 @@ class AsyncFeedbackDefinitionsClient:
         try:
             if 200 <= _response.status_code < 300:
                 return
+            if _response.status_code == 409:
+                raise ConflictError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
             _response_json = _response.json()
         except JSONDecodeError:
             raise ApiError(status_code=_response.status_code, body=_response.text)
@@ -628,7 +692,10 @@ class AsyncFeedbackDefinitionsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -651,6 +718,16 @@ class AsyncFeedbackDefinitionsClient:
         try:
             if 200 <= _response.status_code < 300:
                 return
+            if _response.status_code == 409:
+                raise ConflictError(
+                    typing.cast(
+                        typing.Optional[typing.Any],
+                        parse_obj_as(
+                            type_=typing.Optional[typing.Any],  # type: ignore
+                            object_=_response.json(),
+                        ),
+                    )
+                )
             _response_json = _response.json()
         except JSONDecodeError:
             raise ApiError(status_code=_response.status_code, body=_response.text)

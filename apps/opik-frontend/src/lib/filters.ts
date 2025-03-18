@@ -2,8 +2,11 @@ import uniqid from "uniqid";
 import flatten from "lodash/flatten";
 import { Filter } from "@/types/filters";
 import { COLUMN_TYPE, DYNAMIC_COLUMN_TYPE } from "@/types/shared";
-import { makeEndOfDay, makeStartOfDay } from "@/lib/date";
-import { secondsToMilliseconds } from "@/lib/utils";
+import {
+  makeEndOfMinute,
+  makeStartOfMinute,
+  secondsToMilliseconds,
+} from "@/lib/date";
 
 export const isFilterValid = (filter: Filter) => {
   return (
@@ -33,7 +36,7 @@ export const generateSearchByIDFilters = (search?: string) => {
       id: uniqid(),
       field: "id",
       type: COLUMN_TYPE.string,
-      operator: "=",
+      operator: "contains",
       key: "",
       value: search,
     },
@@ -47,12 +50,12 @@ const processTimeFilter: (filter: Filter) => Filter | Filter[] = (filter) => {
         {
           ...filter,
           operator: ">",
-          value: makeStartOfDay(filter.value as string),
+          value: makeStartOfMinute(filter.value as string),
         },
         {
           ...filter,
           operator: "<",
-          value: makeEndOfDay(filter.value as string),
+          value: makeEndOfMinute(filter.value as string),
         },
       ];
     case ">":
@@ -60,7 +63,7 @@ const processTimeFilter: (filter: Filter) => Filter | Filter[] = (filter) => {
       return [
         {
           ...filter,
-          value: makeEndOfDay(filter.value as string),
+          value: makeEndOfMinute(filter.value as string),
         },
       ];
     case "<":
@@ -68,7 +71,7 @@ const processTimeFilter: (filter: Filter) => Filter | Filter[] = (filter) => {
       return [
         {
           ...filter,
-          value: makeStartOfDay(filter.value as string),
+          value: makeStartOfMinute(filter.value as string),
         },
       ];
     default:

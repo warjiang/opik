@@ -1,5 +1,6 @@
 from playwright.sync_api import Page, expect, Locator
 import re
+import time
 
 
 class TracesPage:
@@ -8,9 +9,12 @@ class TracesPage:
         self.traces_table = self.page.get_by_role("table")
         self.trace_names_selector = "tr td:nth-child(3) div span"
         self.trace_id_selector = "tr:nth-child({}) > td:nth-child(2) > div".format
-        self.next_page_button_locator = self.page.locator(
-            "div:has(> button:nth-of-type(4))"
-        ).locator("button:nth-of-type(3)")
+        self.next_page_button_locator = (
+            self.page.locator("div")
+            .filter(has_text=re.compile(r"^Showing (\d+)-(\d+) of (\d+)"))
+            .nth(2)
+            .locator("button:nth-of-type(3)")
+        )
         self.delete_button_locator = (
             self.page.locator("div")
             .filter(has_text=re.compile(r"^Add to dataset$"))
@@ -64,6 +68,21 @@ class TracesPage:
             return int(match.group(1))
         else:
             return 0
+
+    def wait_for_traces_to_be_visible(self, timeout=10, initial_delay=1):
+        start_time = time.time()
+        delay = initial_delay
+
+        while time.time() - start_time < timeout:
+            traces_number = self.get_number_of_traces_on_page()
+            if traces_number > 0:
+                return True
+
+            time.sleep(delay)
+            delay = min(delay * 2, timeout - (time.time() - start_time))
+            self.page.reload()
+
+        raise TimeoutError(f"could not get traces in UI within {timeout} seconds")
 
     def delete_single_trace_by_name(self, name: str):
         trace = self.page.get_by_role("row").filter(has_text=name).first

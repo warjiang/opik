@@ -3,26 +3,31 @@ import { keepPreviousData } from "@tanstack/react-query";
 import useLocalStorageState from "use-local-storage-state";
 import { ColumnPinningState } from "@tanstack/react-table";
 import { Link } from "@tanstack/react-router";
-import { Book } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 
 import DataTable from "@/components/shared/DataTable/DataTable";
 import DataTableNoData from "@/components/shared/DataTableNoData/DataTableNoData";
 import ResourceCell from "@/components/shared/DataTableCells/ResourceCell";
-import useProjectsList from "@/api/projects/useProjectsList";
+import useProjectWithStatisticsList from "@/hooks/useProjectWithStatisticsList";
 import Loader from "@/components/shared/Loader/Loader";
 import AddEditProjectDialog from "@/components/pages/ProjectsPage/AddEditProjectDialog";
 import { Button } from "@/components/ui/button";
 import useAppStore from "@/store/AppStore";
 import { COLUMN_NAME_ID, COLUMN_SELECT_ID, COLUMN_TYPE } from "@/types/shared";
 import { RESOURCE_TYPE } from "@/components/shared/ResourceLink/ResourceLink";
-import { Project } from "@/types/projects";
+import { ProjectWithStatistic } from "@/types/projects";
 import { formatDate } from "@/lib/date";
 import { convertColumnDataToColumn } from "@/lib/table";
-import { buildDocsUrl } from "@/lib/utils";
+import FeedbackScoreListCell from "@/components/shared/DataTableCells/FeedbackScoreListCell";
+import { get } from "lodash";
+import { formatNumericData } from "@/lib/utils";
 
 const COLUMNS_WIDTH_KEY = "home-projects-columns-width";
 
-export const COLUMNS = convertColumnDataToColumn<Project, Project>(
+export const COLUMNS = convertColumnDataToColumn<
+  ProjectWithStatistic,
+  ProjectWithStatistic
+>(
   [
     {
       id: COLUMN_NAME_ID,
@@ -37,19 +42,32 @@ export const COLUMNS = convertColumnDataToColumn<Project, Project>(
       },
     },
     {
-      id: "created_at",
-      label: "Created",
-      type: COLUMN_TYPE.time,
-      accessorFn: (row) => formatDate(row.created_at),
-      sortable: true,
-    },
-    {
       id: "last_updated_at",
       label: "Last updated",
       type: COLUMN_TYPE.time,
       accessorFn: (row) =>
         formatDate(row.last_updated_trace_at ?? row.last_updated_at),
       sortable: true,
+    },
+    {
+      id: "feedback_scores",
+      label: "Feedback scores",
+      type: COLUMN_TYPE.numberDictionary,
+      accessorFn: (row) =>
+        get(row, "feedback_scores", []).map((score) => ({
+          ...score,
+          value: formatNumericData(score.value),
+        })),
+      cell: FeedbackScoreListCell as never,
+      customMeta: {
+        getHoverCardName: (row: ProjectWithStatistic) => row.name,
+        isAverageScores: true,
+      },
+    },
+    {
+      id: "trace_count",
+      label: "Trace count",
+      type: COLUMN_TYPE.number,
     },
   ],
   {},
@@ -66,7 +84,7 @@ const ObservabilitySection: React.FunctionComponent = () => {
   const resetDialogKeyRef = useRef(0);
   const [openDialog, setOpenDialog] = useState<boolean>(false);
 
-  const { data, isPending } = useProjectsList(
+  const { data, isPending } = useProjectWithStatisticsList(
     {
       workspaceName,
       sorting: [
@@ -111,29 +129,10 @@ const ObservabilitySection: React.FunctionComponent = () => {
   }
 
   return (
-    <div className="pb-4">
-      <div className="flex items-center justify-between gap-8 pb-4 pt-2">
-        <div className="flex items-center gap-2">
-          <h2 className="comet-body-accented truncate break-words">
-            Observability
-          </h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <a
-              href={buildDocsUrl("/tracing/log_traces")}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Book className="mr-2 size-4 shrink-0" />
-              Learn more
-            </a>
-          </Button>
-          <Link to="/$workspaceName/projects" params={{ workspaceName }}>
-            <Button variant="outline">View all projects</Button>
-          </Link>
-        </div>
-      </div>
+    <div className="pt-12">
+      <h2 className="comet-body-accented truncate break-words pb-3">
+        Observability
+      </h2>
       <DataTable
         columns={COLUMNS}
         data={projects}
@@ -147,6 +146,13 @@ const ObservabilitySection: React.FunctionComponent = () => {
           </DataTableNoData>
         }
       />
+      <div className="flex justify-end pt-1">
+        <Link to="/$workspaceName/projects" params={{ workspaceName }}>
+          <Button variant="ghost" className="flex items-center gap-1 pr-0">
+            All projects <ArrowRight className="size-4" />
+          </Button>
+        </Link>
+      </div>
       <AddEditProjectDialog
         key={resetDialogKeyRef.current}
         open={openDialog}

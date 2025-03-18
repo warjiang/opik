@@ -165,12 +165,15 @@ You can learn more about the `opik` python SDK in the following sections:
    :caption: Integrations
    :maxdepth: 1
    
-   integrations/openai/index
    integrations/anthropic/index
-   integrations/langchain/index
-   integrations/haystack/index
    integrations/bedrock/index
+   integrations/crewai/index
+   integrations/dspy/index
+   integrations/guardrails/index
+   integrations/haystack/index
+   integrations/langchain/index
    integrations/llama_index/index
+   integrations/openai/index
 
 .. toctree::
    :caption: Evaluation
@@ -178,6 +181,7 @@ You can learn more about the `opik` python SDK in the following sections:
    
    evaluation/Dataset
    evaluation/evaluate
+   evaluation/evaluate_prompt
    evaluation/evaluate_experiment
    evaluation/metrics/index
 
@@ -211,6 +215,7 @@ You can learn more about the `opik` python SDK in the following sections:
    Objects/Prompt.rst
    Objects/OpikBaseModel.rst
    Objects/LiteLLMChatModel.rst
+   Objects/DistributedTraceHeadersDict.rst
 .. toctree::
    :maxdepth: 1
    :caption: Command Line Interface

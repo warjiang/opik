@@ -91,8 +91,8 @@ public class ChatCompletionsClient {
         }
     }
 
-    public List<ErrorMessage> createAndStreamError(
-            String apiKey, String workspaceName, ChatCompletionRequest request) {
+    public ErrorMessage createAndStreamError(
+            String apiKey, String workspaceName, ChatCompletionRequest request, int expectedStatusCode) {
         assertThat(request.stream()).isTrue();
 
         try (var response = clientSupport.target(getCreateUrl())
@@ -102,7 +102,22 @@ public class ChatCompletionsClient {
                 .header(RequestContext.WORKSPACE_HEADER, workspaceName)
                 .post(Entity.json(request))) {
 
-            assertThat(response.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_OK);
+            assertThat(response.getStatusInfo().getStatusCode()).isEqualTo(expectedStatusCode);
+
+            return response.readEntity(ErrorMessage.class);
+        }
+    }
+
+    public List<ErrorMessage> createAndGetStreamedError(
+            String apiKey, String workspaceName, ChatCompletionRequest request) {
+        assertThat(request.stream()).isTrue();
+
+        try (var response = clientSupport.target(getCreateUrl())
+                .request()
+                .accept(MediaType.SERVER_SENT_EVENTS)
+                .header(HttpHeaders.AUTHORIZATION, apiKey)
+                .header(RequestContext.WORKSPACE_HEADER, workspaceName)
+                .post(Entity.json(request))) {
 
             return getStreamedError(response);
         }

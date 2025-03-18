@@ -2,16 +2,20 @@ package com.comet.opik.api.resources.v1.priv;
 
 import com.codahale.metrics.annotation.Timed;
 import com.comet.opik.api.BatchDelete;
+import com.comet.opik.api.FeedbackScoreNames;
 import com.comet.opik.api.Page;
 import com.comet.opik.api.Project;
 import com.comet.opik.api.ProjectCriteria;
 import com.comet.opik.api.ProjectRetrieve;
+import com.comet.opik.api.ProjectStatsSummary;
 import com.comet.opik.api.ProjectUpdate;
 import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.metrics.ProjectMetricRequest;
 import com.comet.opik.api.metrics.ProjectMetricResponse;
+import com.comet.opik.api.resources.v1.priv.validate.IdParamsValidator;
 import com.comet.opik.api.sorting.SortingFactoryProjects;
 import com.comet.opik.api.sorting.SortingField;
+import com.comet.opik.domain.FeedbackScoreService;
 import com.comet.opik.domain.ProjectMetricsService;
 import com.comet.opik.domain.ProjectService;
 import com.comet.opik.infrastructure.auth.RequestContext;
@@ -48,7 +52,9 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static com.comet.opik.domain.ProjectMetricsService.ERR_START_BEFORE_END;
@@ -63,10 +69,12 @@ import static com.comet.opik.utils.AsyncUtils.setRequestContext;
 @Tag(name = "Projects", description = "Project related resources")
 public class ProjectsResource {
 
+    private static final String PAGE_SIZE = "10";
     private final @NonNull ProjectService projectService;
     private final @NonNull Provider<RequestContext> requestContext;
     private final @NonNull SortingFactoryProjects sortingFactory;
     private final @NonNull ProjectMetricsService metricsService;
+    private final @NonNull FeedbackScoreService feedbackScoreService;
 
     @GET
     @Operation(operationId = "findProjects", summary = "Find projects", description = "Find projects", responses = {
@@ -75,7 +83,7 @@ public class ProjectsResource {
     @JsonView({Project.View.Public.class})
     public Response find(
             @QueryParam("page") @Min(1) @DefaultValue("1") int page,
-            @QueryParam("size") @Min(1) @DefaultValue("10") int size,
+            @QueryParam("size") @Min(1) @DefaultValue(PAGE_SIZE) int size,
             @QueryParam("name") String name,
             @QueryParam("sorting") String sorting) {
 
@@ -182,7 +190,7 @@ public class ProjectsResource {
             @ApiResponse(responseCode = "400", description = "Bad Request", content = @Content(schema = @Schema(implementation = ErrorMessage.class))),
             @ApiResponse(responseCode = "404", description = "Not Found", content = @Content(schema = @Schema(implementation = ErrorMessage.class)))
     })
-    @JsonView({Project.View.Public.class})
+    @JsonView({Project.View.Detailed.class})
     public Response retrieveProject(
             @RequestBody(content = @Content(schema = @Schema(implementation = ProjectRetrieve.class))) @Valid ProjectRetrieve retrieve) {
         String workspaceId = requestContext.get().getWorkspaceId();
@@ -232,9 +240,62 @@ public class ProjectsResource {
         return Response.ok().entity(response).build();
     }
 
+    @GET
+    @Path("/feedback-scores/names")
+    @Operation(operationId = "findFeedbackScoreNamesByProjectIds", summary = "Find Feedback Score names By Project Ids", description = "Find Feedback Score names By Project Ids", responses = {
+            @ApiResponse(responseCode = "200", description = "Feedback Scores resource", content = @Content(schema = @Schema(implementation = FeedbackScoreNames.class)))
+    })
+    public Response findFeedbackScoreNames(@QueryParam("project_ids") String projectIdsQueryParam) {
+
+        var projectIds = Optional.ofNullable(projectIdsQueryParam)
+                .map(IdParamsValidator::getIds)
+                .orElse(Collections.emptySet());
+
+        String workspaceId = requestContext.get().getWorkspaceId();
+
+        log.info("Find feedback score names by project_ids '{}', on workspaceId '{}'",
+                projectIds, workspaceId);
+        FeedbackScoreNames feedbackScoreNames = feedbackScoreService
+                .getProjectsFeedbackScoreNames(projectIds)
+                .contextWrite(ctx -> setRequestContext(ctx, requestContext))
+                .block();
+        log.info("Found feedback score names '{}' by project_ids '{}', on workspaceId '{}'",
+                feedbackScoreNames.scores().size(), projectIds, workspaceId);
+
+        return Response.ok(feedbackScoreNames).build();
+    }
+
     private void validate(ProjectMetricRequest request) {
         if (!request.intervalStart().isBefore(request.intervalEnd())) {
             throw new BadRequestException(ERR_START_BEFORE_END);
         }
     }
+
+    @GET
+    @Path("/stats")
+    @Operation(operationId = "getProjectStats", summary = "Get Project Stats", description = "Get Project Stats", responses = {
+            @ApiResponse(responseCode = "200", description = "Project Stats", content = @Content(schema = @Schema(implementation = ProjectStatsSummary.class))),
+    })
+    public Response getProjectStats(
+            @QueryParam("page") @Min(1) @DefaultValue("1") int page,
+            @QueryParam("size") @Min(1) @DefaultValue(PAGE_SIZE) int size,
+            @QueryParam("name") String name,
+            @QueryParam("sorting") String sorting) {
+
+        var criteria = ProjectCriteria.builder()
+                .projectName(name)
+                .build();
+
+        String workspaceId = requestContext.get().getWorkspaceId();
+
+        List<SortingField> sortingFields = sortingFactory.newSorting(sorting);
+
+        log.info("Find projects stats by '{}' on workspaceId '{}'", criteria, workspaceId);
+        ProjectStatsSummary projectStatisticsSummary = projectService.getStats(page, size, criteria, sortingFields);
+        log.info("Found projects stats by '{}', count '{}' on workspaceId '{}'", criteria,
+                projectStatisticsSummary.content().size(), workspaceId);
+
+        return Response.ok().entity(projectStatisticsSummary).build();
+    }
+
 }

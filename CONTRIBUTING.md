@@ -47,106 +47,21 @@ In addition, Opik relies on:
 2. MySQL: Used to store metadata associated with projects, datasets, experiments, etc.
 3. Redis: Used for caching
 
-### Configuring your development environment
-
-#### Pre-requisites
-In order to run the development environment, you will need to have the following tools installed:
-
-* Docker - https://docs.docker.com/engine/install/
-
-* kubectl - https://kubernetes.io/docs/tasks/tools/#kubectl
-
-* Helm - https://helm.sh/docs/intro/install/
-
-* minikube - https://minikube.sigs.k8s.io/docs/start
-
-* More tools:
-    * **`bash`** completion / `zsh` completion
-    * `kubectx` and `kubens` - easy switch context/namespaces for kubectl -  https://github.com/ahmetb/kubectx
-
 #### Setting up the environment
 
-The local development environment is based on minikube. Once you have minikube installed, you can run it using:
-
-```bash
-minikube start
-```
-
-You can then run Opik and it's dependencies (Clickhouse, Redis, MySQL, etc) using:
-
-```bash
-./build_and_run.sh
-```
-
-This script supports the following options:
-```
---no-build          Skip the build process
---no-fe-build       Skip the FE build process
---no-helm-update    Skip helm repo update
---local-fe          Run FE locally (For frontend developers)
---help              Display help message
-```
-
-> [!NOTE]
-> The first time you run the `build_and_run` script, it can take a few minutes to install everything.
-
-To check the application is running, you can access the FE using: `http://localhost:5173`
-
-#### Advanced usage
-
-*Connecting to Clickhouse*
-You can run the `clickhouse-client` with:
-```bash
-kubectl exec -it chi-opik-clickhouse-cluster-0-0-0 clickhouse-client
-```
-
-After the client is connected, you can check the databases with 
-```bash
-show databases;
-```
-
-*Minikube commands*
-
-List the pods that are running
-```bash
-kubectl get pods
-```
-To restart a pod just delete the pod, k8s will start a new one
-```bash
-kubectl delete pod <pod name>
-```
-There is no clean way to delete the databases, so if you need to do that, it's better to delete the namespace and then install again.
-Run 
-```bash
-kubectl delete namespace opik 
-```
-and in parallel (in another terminal window/tab) run 
-```bash
-kubectl patch chi opik-clickhouse --type json --patch='[ { "op": "remove", "path": "/metadata/finalizers" } ]'
-```
-after the namespace is deleted, run 
-```bash
-./build_and_run.sh --no-build
-```
-to install everything again
-
-Stop minikube
-```bash
-minikube stop
-```
-Next time you will start the minikube, it will run everything with the same configuration and data you had before.
+The local development environment is based on `docker-compose`. 
+Please see instructions in `deployment/docker-compose/README.md`
 
 ### Contributing to the documentation
 
-The documentation is made up of three main parts:
+The documentation is made up of two main parts:
 
 1. `apps/opik-documentation/documentation`: The Opik documentation website
 2. `apps/opik-documentation/python-sdk-docs`: The Python reference documentation
-3. `apps/opik-documentation/rest-api-docs`: The REST API reference documentation
 
 #### Contributing to the documentation website
 
-The documentation website is built using [Docusaurus](https://docusaurus.io/) and is located in `apps/opik-documentation/documentation`.
+The documentation website is built using [Fern](https://www.buildwithfern.com/) and is located in `apps/opik-documentation/documentation`.
 
 In order to run the documentation website locally, you need to have `npm` installed. Once installed, you can run the documentation locally using the following command:
 
@@ -157,10 +72,16 @@ cd apps/opik-documentation/documentation
 npm install
 
 # Run the documentation website locally
-npm run start
+npm run dev
 ```
 
 You can then access the documentation website at `http://localhost:3000`. Any change you make to the documentation will be updated in real-time.
+
+When updating the documentation, you will need to update either:
+
+- `docs/cookbook`: This is where all our cookbooks are located.
+- `fern/docs`: This is where all the markdown code is stored and where the majority of the documentation is located.
+
 
 #### Contributing to the Python SDK reference documentation
 
@@ -189,8 +110,11 @@ In order to develop features in the Python SDK, you will need to have Opik runni
 ```bash
 cd deployment/docker-compose
 
+# Optionally, you can force a pull of the latest images
+docker compose pull
+
 # Starting the Opik platform
-docker compose up --detach
+docker compose up -d
 
 # Configure the Python SDK to point to the local Opik deployment
 opik configure --use_local
@@ -199,6 +123,8 @@ opik configure --use_local
 The Opik server will be running on `http://localhost:5173`.
 
 **Submitting a PR:**
+
+First, please read the [coding guidelines](sdks/python/README.md) for our Python SDK
 
 The Python SDK is available under `sdks/python` and can be installed locally using `pip install -e sdks/python`.
 
@@ -225,41 +151,114 @@ pre-commit run --all-files
 
 The Opik frontend is a React application that is located in `apps/opik-frontend`.
 
-In order to run the frontend locally, you need to have `npm` installed. Once installed, you can run the frontend locally using the following command:
+If you want to run the front-end locally and see your changes instantly on saving files, follow this guide:
 
-```bash
-# Run the backend locally with the flag "--local-fe"
-./build_and_run.sh --local-fe
+#### Prerequisites
 
-cd apps/opik-frontend
+1. Ensure you have **Node.js** installed.
 
-# Install dependencies - Only needs to be run once
-npm install
+#### Steps
 
-# Run the frontend locally
-npm run start
-```
+#### 1. Configure the Environment Variables
 
-You can then access the development frontend at `http://localhost:5173/`. Any change you make to the frontend will be updated in real-time.
+- Navigate to `apps/opik-frontend/.env.development` and update it with the following values:
 
-> You will need to open the FE using `http://localhost:5173/` ignoring the output from the `npm run start` command which will recommend to open `http://localhost:5174/`. In case `http://localhost:5174/` is opened, the BE will not be accessible.
+  ```ini
+  VITE_BASE_URL=/
+  VITE_BASE_API_URL=http://localhost:8080
+  ```
 
-Before submitting a PR, please ensure that your code passes the test suite, the linter and the type checker:
+#### 2. Enable CORS in the Back-End
 
-```bash
-cd apps/opik-frontend
+- Open `deployment/docker-compose/docker-compose.yaml` and in the `services.backend.environment` section,
+  add `CORS: true` to allow cross-origin requests.
 
-npm run e2e
-npm run lint
-npm run typecheck
-```
+  It should look like this:
+
+  ```yaml
+  ...
+  OPIK_USAGE_REPORT_ENABLED: ${OPIK_USAGE_REPORT_ENABLED:-true}
+  CORS: true
+  ...
+  ```
+
+#### 3. Start the Services
+
+- Run the following command to start the necessary services and expose the required ports:
+
+  ```bash
+  # Optionally, you can force a pull of the latest images
+  docker compose pull
+  
+  docker compose -f docker-compose.yaml -f docker-compose.override.yaml up -d
+  ```
+
+#### 4. Verify the Back-End is Running
+
+- Wait for the images to build and containers to start.
+- To confirm that the back-end is running, open the following URL in your browser:
+
+  ```
+  http://localhost:8080/is-alive/ver
+  ```
+
+    - If you see a version number displayed, the back-end is running successfully.
+
+#### 5. Install Front-End Dependencies
+
+- Navigate to the front-end project directory:
+
+  ```bash
+  cd opik/apps/opik-frontend
+  ```
+
+- Install the necessary dependencies:
+
+  ```bash
+  npm install
+  ```
+
+#### 6. Start the Front-End
+
+- Run the following command to start the front-end:
+
+  ```bash
+  npm run start
+  ```
+
+- Once the script completes, open your browser and go to:
+
+  ```
+  http://localhost:5174/
+  ```
+
+  You should see the app running! 🎉
+
+### Notes:
+
+- Another built front-end version will be available at `http://localhost:5173/`.  
+  This version is used for checking builds, but you can also use it for the same purposes if needed.
+
+
+- Before submitting a PR, please ensure that your code passes the test suite, the linter and the type checker:
+
+  ```bash
+  cd apps/opik-frontend
+  
+  npm run e2e
+  npm run lint
+  npm run typecheck
+  ```
 
 ### Contributing to the backend
 
-In order to run the external services (Clickhouse, MySQL, Redis), you can use the `build_and_run.sh` script or `docker-compose`:
+In order to run the external services (Clickhouse, MySQL, Redis), you can use `docker-compose`:
 
 ```bash
 cd deployment/docker-compose
+
+# Optionally, you can force a pull of the latest images
+docker compose pull
 
 docker compose up clickhouse redis mysql -d
 ```
@@ -282,6 +281,23 @@ java -jar target/opik-backend-{project.pom.version}.jar server config.yml
 Replace `{project.pom.version}` with the version of the project in the pom file.
 
 Once the backend is running, you can access the Opik API at `http://localhost:8080`.
+
+#### Formatting the code
+
+Before submitting a PR, please ensure that your code is formatted correctly.
+Run the following command to automatically format your code:
+
+```bash
+mvn spotless:apply
+```
+
+Our CI will check that the code is formatted correctly and will fail if it is not by running the following command:
+
+```bash
+mvn spotless:check
+```
+
+#### Testing the backend
 
 Before submitting a PR, please ensure that your code passes the test suite:
 

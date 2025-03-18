@@ -8,6 +8,7 @@ import datetime as dt
 from .json_node import JsonNode
 from .error_info import ErrorInfo
 from .feedback_score import FeedbackScore
+from .comment import Comment
 from ..core.pydantic_utilities import IS_PYDANTIC_V2
 
 
@@ -38,7 +39,9 @@ class Span(UniversalBaseModel):
     created_by: typing.Optional[str] = None
     last_updated_by: typing.Optional[str] = None
     feedback_scores: typing.Optional[typing.List[FeedbackScore]] = None
+    comments: typing.Optional[typing.List[Comment]] = None
     total_estimated_cost: typing.Optional[float] = None
+    total_estimated_cost_version: typing.Optional[str] = None
     duration: typing.Optional[float] = pydantic.Field(default=None)
     """
     Duration in milliseconds as a decimal number to support sub-millisecond precision

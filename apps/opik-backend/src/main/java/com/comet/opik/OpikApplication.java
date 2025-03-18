@@ -1,24 +1,32 @@
 package com.comet.opik;
 
-import com.comet.opik.api.error.JsonInvalidFormatExceptionMapper;
+import com.comet.opik.api.error.JsonProcessingExceptionMapper;
 import com.comet.opik.infrastructure.ConfigurationModule;
 import com.comet.opik.infrastructure.EncryptionUtils;
 import com.comet.opik.infrastructure.OpikConfiguration;
 import com.comet.opik.infrastructure.auth.AuthModule;
+import com.comet.opik.infrastructure.aws.AwsModule;
 import com.comet.opik.infrastructure.bi.BiModule;
 import com.comet.opik.infrastructure.bi.OpikGuiceyLifecycleEventListener;
 import com.comet.opik.infrastructure.bundle.LiquibaseBundle;
+import com.comet.opik.infrastructure.cache.CacheModule;
 import com.comet.opik.infrastructure.db.DatabaseAnalyticsModule;
 import com.comet.opik.infrastructure.db.IdGeneratorModule;
 import com.comet.opik.infrastructure.db.NameGeneratorModule;
 import com.comet.opik.infrastructure.events.EventModule;
 import com.comet.opik.infrastructure.http.HttpModule;
 import com.comet.opik.infrastructure.job.JobGuiceyInstaller;
+import com.comet.opik.infrastructure.llm.LlmModule;
+import com.comet.opik.infrastructure.llm.antropic.AnthropicModule;
+import com.comet.opik.infrastructure.llm.gemini.GeminiModule;
+import com.comet.opik.infrastructure.llm.openai.OpenAIModule;
+import com.comet.opik.infrastructure.llm.openrouter.OpenRouterModule;
 import com.comet.opik.infrastructure.ratelimit.RateLimitModule;
 import com.comet.opik.infrastructure.redis.RedisModule;
 import com.comet.opik.utils.JsonBigDecimalDeserializer;
 import com.comet.opik.utils.OpenAiMessageJsonDeserializer;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.core.json.JsonReadFeature;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.module.SimpleModule;
@@ -72,7 +80,9 @@ public class OpikApplication extends Application<OpikConfiguration> {
                         .withPlugins(new SqlObjectPlugin(), new Jackson2Plugin()))
                 .modules(new DatabaseAnalyticsModule(), new IdGeneratorModule(), new AuthModule(), new RedisModule(),
                         new RateLimitModule(), new NameGeneratorModule(), new HttpModule(), new EventModule(),
-                        new ConfigurationModule(), new BiModule())
+                        new ConfigurationModule(), new BiModule(), new CacheModule(), new AnthropicModule(),
+                        new GeminiModule(), new OpenAIModule(), new OpenRouterModule(), new LlmModule(),
+                        new AwsModule())
                 .installers(JobGuiceyInstaller.class)
                 .listen(new OpikGuiceyLifecycleEventListener())
                 .enableAutoConfig()
@@ -82,6 +92,7 @@ public class OpikApplication extends Application<OpikConfiguration> {
     @Override
     public void run(OpikConfiguration configuration, Environment environment) {
         EncryptionUtils.setConfig(configuration);
+
         // Resources
         var jersey = environment.jersey();
 
@@ -90,6 +101,7 @@ public class OpikApplication extends Application<OpikConfiguration> {
         // However, it does not apply to OpenAPI documentation.
         environment.getObjectMapper().setPropertyNamingStrategy(PropertyNamingStrategies.SnakeCaseStrategy.INSTANCE);
         environment.getObjectMapper().configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+        environment.getObjectMapper().enable(JsonReadFeature.ALLOW_NON_NUMERIC_NUMBERS.mappedFeature());
         environment.getObjectMapper()
                 .registerModule(new SimpleModule()
                         .addDeserializer(BigDecimal.class, JsonBigDecimalDeserializer.INSTANCE)
@@ -97,6 +109,6 @@ public class OpikApplication extends Application<OpikConfiguration> {
 
         jersey.property(ServerProperties.RESPONSE_SET_STATUS_OVER_SEND_ERROR, true);
 
-        jersey.register(JsonInvalidFormatExceptionMapper.class);
+        jersey.register(JsonProcessingExceptionMapper.class);
     }
 }

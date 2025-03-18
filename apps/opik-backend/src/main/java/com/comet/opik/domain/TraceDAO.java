@@ -3,10 +3,14 @@ package com.comet.opik.domain;
 import com.comet.opik.api.BiInformationResponse.BiInformation;
 import com.comet.opik.api.ProjectStats;
 import com.comet.opik.api.Trace;
+import com.comet.opik.api.TraceDetails;
 import com.comet.opik.api.TraceSearchCriteria;
+import com.comet.opik.api.TraceThread;
 import com.comet.opik.api.TraceUpdate;
+import com.comet.opik.api.sorting.TraceSortingFactory;
 import com.comet.opik.domain.filter.FilterQueryBuilder;
 import com.comet.opik.domain.filter.FilterStrategy;
+import com.comet.opik.domain.sorting.SortingQueryBuilder;
 import com.comet.opik.domain.stats.StatsMapper;
 import com.comet.opik.infrastructure.db.TransactionTemplateAsync;
 import com.comet.opik.utils.JsonUtils;
@@ -24,6 +28,7 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.reactivestreams.Publisher;
 import org.stringtemplate.v4.ST;
 import reactor.core.publisher.Flux;
@@ -43,9 +48,11 @@ import java.util.stream.Collectors;
 import static com.comet.opik.api.ErrorInfo.ERROR_INFO_TYPE;
 import static com.comet.opik.api.Trace.TracePage;
 import static com.comet.opik.api.TraceCountResponse.WorkspaceTraceCount;
+import static com.comet.opik.api.TraceThread.TraceThreadPage;
 import static com.comet.opik.domain.AsyncContextUtils.bindUserNameAndWorkspaceContext;
 import static com.comet.opik.domain.AsyncContextUtils.bindWorkspaceIdToFlux;
 import static com.comet.opik.domain.AsyncContextUtils.bindWorkspaceIdToMono;
+import static com.comet.opik.domain.CommentResultMapper.getComments;
 import static com.comet.opik.domain.FeedbackScoreDAO.EntityType;
 import static com.comet.opik.infrastructure.instrumentation.InstrumentAsyncUtils.Segment;
 import static com.comet.opik.infrastructure.instrumentation.InstrumentAsyncUtils.endSegment;
@@ -67,6 +74,8 @@ interface TraceDAO {
 
     Mono<Trace> findById(UUID id, Connection connection);
 
+    Mono<TraceDetails> getTraceDetailsById(UUID id, Connection connection);
+
     Mono<TracePage> find(int size, int page, TraceSearchCriteria traceSearchCriteria, Connection connection);
 
     Mono<Void> partialInsert(UUID projectId, TraceUpdate traceUpdate, UUID traceId, Connection connection);
@@ -79,13 +88,22 @@ interface TraceDAO {
 
     Mono<Map<UUID, Instant>> getLastUpdatedTraceAt(Set<UUID> projectIds, String workspaceId, Connection connection);
 
-    Mono<Map<UUID, UUID>> getProjectIdFromTraces(Set<UUID> traceIds);
+    Mono<UUID> getProjectIdFromTrace(@NonNull UUID traceId);
 
     Flux<BiInformation> getTraceBIInformation(Connection connection);
 
     Mono<ProjectStats> getStats(TraceSearchCriteria criteria);
 
     Mono<Long> getDailyTraces();
+
+    Mono<Map<UUID, ProjectStats>> getStatsByProjectIds(List<UUID> projectIds, String workspaceId);
+
+    Mono<TraceThreadPage> findThreads(int size, int page, TraceSearchCriteria threadSearchCriteria);
+
+    Mono<Long> deleteThreads(UUID uuid, List<String> threadIds);
+
+    Mono<TraceThread> findThreadById(UUID projectId, String threadId);
+
 }
 
 @Slf4j
@@ -107,7 +125,8 @@ class TraceDAOImpl implements TraceDAO {
                 tags,
                 error_info,
                 created_by,
-                last_updated_by
+                last_updated_by,
+                thread_id
             ) VALUES
                 <items:{item |
                     (
@@ -123,7 +142,8 @@ class TraceDAOImpl implements TraceDAO {
                         :tags<item.index>,
                         :error_info<item.index>,
                         :user_name,
-                        :user_name
+                        :user_name,
+                        :thread_id<item.index>
                     )
                     <if(item.hasNext)>,<endif>
                 }>
@@ -151,7 +171,8 @@ class TraceDAOImpl implements TraceDAO {
                 error_info,
                 created_at,
                 created_by,
-                last_updated_by
+                last_updated_by,
+                thread_id
             )
             SELECT
                 new_trace.id as id,
@@ -205,7 +226,11 @@ class TraceDAOImpl implements TraceDAO {
                     LENGTH(old_trace.created_by) > 0, old_trace.created_by,
                     new_trace.created_by
                 ) as created_by,
-                new_trace.last_updated_by as last_updated_by
+                new_trace.last_updated_by as last_updated_by,
+                multiIf(
+                    LENGTH(old_trace.thread_id) > 0, old_trace.thread_id,
+                    new_trace.thread_id
+                ) as thread_id
             FROM (
                 SELECT
                     :id as id,
@@ -221,14 +246,15 @@ class TraceDAOImpl implements TraceDAO {
                     :error_info as error_info,
                     now64(9) as created_at,
                     :user_name as created_by,
-                    :user_name as last_updated_by
+                    :user_name as last_updated_by,
+                    :thread_id as thread_id
             ) as new_trace
             LEFT JOIN (
                 SELECT
                     *
                 FROM traces
                 WHERE id = :id
-                ORDER BY id DESC, last_updated_at DESC
+                ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                 LIMIT 1
             ) as old_trace
             ON new_trace.id = old_trace.id
@@ -240,7 +266,7 @@ class TraceDAOImpl implements TraceDAO {
      ***/
     private static final String UPDATE = """
             INSERT INTO traces (
-            	id, project_id, workspace_id, name, start_time, end_time, input, output, metadata, tags, error_info, created_at, created_by, last_updated_by
+            	id, project_id, workspace_id, name, start_time, end_time, input, output, metadata, tags, error_info, created_at, created_by, last_updated_by, thread_id
             ) SELECT
             	id,
             	project_id,
@@ -255,11 +281,12 @@ class TraceDAOImpl implements TraceDAO {
             	<if(error_info)> :error_info <else> error_info <endif> as error_info,
             	created_at,
             	created_by,
-                :user_name as last_updated_by
+                :user_name as last_updated_by,
+                <if(thread_id)> :thread_id <else> thread_id <endif> as thread_id
             FROM traces
             WHERE id = :id
             AND workspace_id = :workspace_id
-            ORDER BY id DESC, last_updated_at DESC
+            ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
             LIMIT 1
             ;
             """;
@@ -267,20 +294,20 @@ class TraceDAOImpl implements TraceDAO {
     private static final String SELECT_BY_ID = """
             SELECT
                 t.*,
-                t.duration_millis,
                 sumMap(s.usage) as usage,
-                sum(s.total_estimated_cost) as total_estimated_cost
+                sum(s.total_estimated_cost) as total_estimated_cost,
+                groupUniqArrayArray(c.comments_array) as comments
             FROM (
                 SELECT
                     *,
                     if(end_time IS NOT NULL AND start_time IS NOT NULL
                                 AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
                             (dateDiff('microsecond', start_time, end_time) / 1000.0),
-                            NULL) AS duration_millis
+                            NULL) AS duration
                 FROM traces
                 WHERE workspace_id = :workspace_id
                 AND id = :id
-                ORDER BY id DESC, last_updated_at DESC
+                ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                 LIMIT 1 BY id
             ) AS t
             LEFT JOIN (
@@ -291,49 +318,144 @@ class TraceDAOImpl implements TraceDAO {
                 FROM spans
                 WHERE workspace_id = :workspace_id
                 AND trace_id = :id
-                ORDER BY id DESC, last_updated_at DESC
+                ORDER BY (workspace_id, project_id, trace_id, parent_span_id, id) DESC, last_updated_at DESC
                 LIMIT 1 BY id
             ) AS s ON t.id = s.trace_id
+            LEFT JOIN (
+                SELECT
+                    entity_id,
+                    groupArray(tuple(*)) AS comments_array
+                FROM (
+                    SELECT
+                        id,
+                        text,
+                        created_at,
+                        last_updated_at,
+                        created_by,
+                        last_updated_by,
+                        entity_id
+                    FROM comments
+                    WHERE workspace_id = :workspace_id
+                    AND entity_id = :id
+                    ORDER BY (workspace_id, project_id, entity_id, id) DESC, last_updated_at DESC
+                    LIMIT 1 BY id
+                )
+                GROUP BY entity_id
+            ) AS c ON t.id = c.entity_id
             GROUP BY
-                t.*,
-                duration_millis
-            ORDER BY t.id DESC
+                t.*
+            ;
+            """;
+
+    private static final String SELECT_DETAILS_BY_ID = """
+            SELECT DISTINCT
+                workspace_id,
+                project_id
+            FROM traces
+            WHERE id = :id
             ;
             """;
 
     private static final String SELECT_BY_PROJECT_ID = """
-            SELECT
-                t.*,
-                t.duration_millis,
-                sumMap(s.usage) as usage,
-                sum(s.total_estimated_cost) as total_estimated_cost
-            FROM (
+            WITH spans_agg AS (
                 SELECT
-                     id,
-                     workspace_id,
-                     project_id,
-                     name,
-                     start_time,
-                     end_time,
-                     <if(truncate)> replaceRegexpAll(input, '<truncate>', '"[image]"') as input <else> input <endif>,
-                     <if(truncate)> replaceRegexpAll(output, '<truncate>', '"[image]"') as output <else> output <endif>,
-                     <if(truncate)> replaceRegexpAll(metadata, '<truncate>', '"[image]"') as metadata <else> metadata <endif>,
-                     tags,
-                     error_info,
-                     created_at,
-                     last_updated_at,
-                     created_by,
-                     last_updated_by,
+                    workspace_id,
+                    project_id,
+                    trace_id,
+                    sumMap(usage) as usage,
+                    sum(total_estimated_cost) as total_estimated_cost
+                FROM (
+                    SELECT
+                        workspace_id,
+                        project_id,
+                        trace_id,
+                        usage,
+                        total_estimated_cost
+                    FROM spans
+                    WHERE workspace_id = :workspace_id
+                    AND project_id = :project_id
+                    ORDER BY (workspace_id, project_id, trace_id, parent_span_id, id) DESC, last_updated_at DESC
+                    LIMIT 1 BY id
+                )
+                GROUP BY workspace_id, project_id, trace_id
+            ), comments_agg AS (
+                SELECT
+                    entity_id,
+                    groupArray(tuple(id, text, created_at, last_updated_at, created_by, last_updated_by)) AS comments_array
+                FROM (
+                    SELECT
+                        id,
+                        text,
+                        created_at,
+                        last_updated_at,
+                        created_by,
+                        last_updated_by,
+                        entity_id,
+                        workspace_id,
+                        project_id
+                    FROM comments
+                    WHERE workspace_id = :workspace_id
+                    AND project_id = :project_id
+                    ORDER BY (workspace_id, project_id, entity_id, id) DESC, last_updated_at DESC
+                    LIMIT 1 BY id
+                )
+                GROUP BY workspace_id, project_id, entity_id
+            )
+            <if(feedback_scores_empty_filters)>
+             , fsc AS (SELECT entity_id, COUNT(entity_id) AS feedback_scores_count
+                 FROM (
+                    SELECT *
+                    FROM feedback_scores
+                    WHERE entity_type = 'trace'
+                    AND workspace_id = :workspace_id
+                    AND project_id = :project_id
+                    ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
+                    LIMIT 1 BY entity_id, name
+                 )
+                 GROUP BY entity_id
+                 HAVING <feedback_scores_empty_filters>
+            )
+            <endif>
+            SELECT
+                  t.id as id,
+                  t.workspace_id as workspace_id,
+                  t.project_id as project_id,
+                  t.name as name,
+                  t.start_time as start_time,
+                  t.end_time as end_time,
+                  <if(truncate)> replaceRegexpAll(input, '<truncate>', '"[image]"') as input <else> input <endif>,
+                  <if(truncate)> replaceRegexpAll(output, '<truncate>', '"[image]"') as output <else> output <endif>,
+                  <if(truncate)> replaceRegexpAll(metadata, '<truncate>', '"[image]"') as metadata <else> metadata <endif>,
+                  t.tags as tags,
+                  t.error_info as error_info,
+                  t.created_at as created_at,
+                  t.last_updated_at as last_updated_at,
+                  t.created_by as created_by,
+                  t.last_updated_by as last_updated_by,
+                  t.duration as duration,
+                  t.thread_id as thread_id,
+                  sumMap(s.usage) as usage,
+                  sum(s.total_estimated_cost) as total_estimated_cost,
+                  groupUniqArrayArray(c.comments_array) as comments
+             FROM (
+                 SELECT
+                     *,
                      if(end_time IS NOT NULL AND start_time IS NOT NULL
-                                 AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
-                             (dateDiff('microsecond', start_time, end_time) / 1000.0),
-                             NULL) AS duration_millis
-                 FROM traces
-                 WHERE project_id = :project_id
-                 AND workspace_id = :workspace_id
+                             AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
+                         (dateDiff('microsecond', start_time, end_time) / 1000.0),
+                         NULL) AS duration
+                 FROM traces t
+                 <if(trace_aggregation_filters)>
+                 LEFT JOIN spans_agg s ON t.id = s.trace_id
+                 <endif>
+                 <if(feedback_scores_empty_filters)>
+                    LEFT JOIN fsc ON fsc.entity_id = traces.id
+                 <endif>
+                 WHERE workspace_id = :workspace_id
+                 AND project_id = :project_id
                  <if(filters)> AND <filters> <endif>
                  <if(feedback_scores_filters)>
-                 AND id in (
+                 AND id IN (
                     SELECT
                         entity_id
                     FROM (
@@ -342,35 +464,29 @@ class TraceDAOImpl implements TraceDAO {
                         WHERE entity_type = 'trace'
                         AND workspace_id = :workspace_id
                         AND project_id = :project_id
-                        ORDER BY entity_id DESC, last_updated_at DESC
+                        ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
                         LIMIT 1 BY entity_id, name
                     )
                     GROUP BY entity_id
                     HAVING <feedback_scores_filters>
                  )
                  <endif>
-                 ORDER BY id DESC, last_updated_at DESC
+                 <if(trace_aggregation_filters)>
+                 AND <trace_aggregation_filters>
+                 <endif>
+                 <if(feedback_scores_empty_filters)>
+                 AND fsc.feedback_scores_count = 0
+                 <endif>
+                 ORDER BY <if(sort_fields)> <sort_fields>, id DESC <else>(workspace_id, project_id, id) DESC, last_updated_at DESC <endif>
                  LIMIT 1 BY id
                  LIMIT :limit OFFSET :offset
-            ) AS t
-            LEFT JOIN (
-                SELECT
-                    trace_id,
-                    usage,
-                    total_estimated_cost
-                FROM spans
-                WHERE workspace_id = :workspace_id
-                AND project_id = :project_id
-                ORDER BY id DESC, last_updated_at DESC
-                LIMIT 1 BY id
-            ) AS s ON t.id = s.trace_id
-            GROUP BY
-                t.*,
-                t.duration_millis
-            <if(trace_aggregation_filters)>
-            HAVING <trace_aggregation_filters>
-            <endif>
-            ORDER BY t.id DESC
+             ) AS t
+             LEFT JOIN spans_agg AS s ON t.id = s.trace_id
+             LEFT JOIN comments_agg AS c ON t.id = c.entity_id
+             GROUP BY
+                t.*
+             ORDER BY <if(sort_fields)> <sort_fields>, id DESC <else>(workspace_id, project_id, id) DESC, last_updated_at DESC <endif>
+             SETTINGS join_algorithm = 'full_sorting_merge'
             ;
             """;
 
@@ -391,26 +507,46 @@ class TraceDAOImpl implements TraceDAO {
                      COUNT(DISTINCT id) AS trace_count
                 FROM traces
                 WHERE created_at BETWEEN toStartOfDay(yesterday()) AND toStartOfDay(today())
-                GROUP BY workspace_id,created_by
+                GROUP BY workspace_id, created_by
             ;
             """;
 
     private static final String COUNT_BY_PROJECT_ID = """
+            <if(feedback_scores_empty_filters)>
+             WITH fsc AS (SELECT entity_id, COUNT(entity_id) AS feedback_scores_count
+                 FROM (
+                    SELECT *
+                    FROM feedback_scores
+                    WHERE entity_type = 'trace'
+                    AND workspace_id = :workspace_id
+                    AND project_id = :project_id
+                    ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
+                    LIMIT 1 BY entity_id, name
+                 )
+                 GROUP BY entity_id
+                 HAVING <feedback_scores_empty_filters>
+            )
+            <endif>
             SELECT
                 count(id) as count
             FROM (
                 SELECT
-                    t.id,
-                    sumMap(s.usage) as usage,
-                    sum(s.total_estimated_cost) as total_estimated_cost
+                    t.id
+                    <if(trace_aggregation_filters)>
+                    ,sumMap(s.usage) as usage
+                    ,sum(s.total_estimated_cost) as total_estimated_cost
+                    <endif>
                 FROM (
                     SELECT
                         id,
                         if(end_time IS NOT NULL AND start_time IS NOT NULL
                              AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
                          (dateDiff('microsecond', start_time, end_time) / 1000.0),
-                         NULL) AS duration_millis
+                         NULL) AS duration
                     FROM traces
+                    <if(feedback_scores_empty_filters)>
+                    LEFT JOIN fsc ON fsc.entity_id = traces.id
+                    <endif>
                     WHERE project_id = :project_id
                     AND workspace_id = :workspace_id
                     <if(filters)> AND <filters> <endif>
@@ -424,16 +560,20 @@ class TraceDAOImpl implements TraceDAO {
                             WHERE entity_type = 'trace'
                             AND workspace_id = :workspace_id
                             AND project_id = :project_id
-                            ORDER BY entity_id DESC, last_updated_at DESC
+                            ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
                             LIMIT 1 BY entity_id, name
                         )
                         GROUP BY entity_id
                         HAVING <feedback_scores_filters>
                     )
                     <endif>
-                    ORDER BY id DESC, last_updated_at DESC
+                    <if(feedback_scores_empty_filters)>
+                    AND fsc.feedback_scores_count = 0
+                    <endif>
+                    ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) AS t
+                <if(trace_aggregation_filters)>
                 LEFT JOIN (
                     SELECT
                         trace_id,
@@ -442,15 +582,13 @@ class TraceDAOImpl implements TraceDAO {
                     FROM spans
                     WHERE workspace_id = :workspace_id
                     AND project_id = :project_id
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, project_id, trace_id, parent_span_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) AS s ON t.id = s.trace_id
                 GROUP BY
                     t.id
-                <if(trace_aggregation_filters)>
                 HAVING <trace_aggregation_filters>
                 <endif>
-                ORDER BY t.id DESC
             ) AS latest_rows
             ;
             """;
@@ -464,11 +602,9 @@ class TraceDAOImpl implements TraceDAO {
 
     private static final String SELECT_TRACE_ID_AND_WORKSPACE = """
             SELECT
-                id, workspace_id
+                DISTINCT id, workspace_id
             FROM traces
             WHERE id IN :traceIds
-            ORDER BY last_updated_at DESC
-            LIMIT 1 BY id
             ;
             """;
 
@@ -484,7 +620,7 @@ class TraceDAOImpl implements TraceDAO {
     //TODO: refactor to implement proper conflict resolution
     private static final String INSERT_UPDATE = """
             INSERT INTO traces (
-                id, project_id, workspace_id, name, start_time, end_time, input, output, metadata, tags, error_info, created_at, created_by, last_updated_by
+                id, project_id, workspace_id, name, start_time, end_time, input, output, metadata, tags, error_info, created_at, created_by, last_updated_by, thread_id
             )
             SELECT
                 new_trace.id as id,
@@ -544,7 +680,11 @@ class TraceDAOImpl implements TraceDAO {
                     LENGTH(old_trace.created_by) > 0, old_trace.created_by,
                     new_trace.created_by
                 ) as created_by,
-                new_trace.last_updated_by as last_updated_by
+                new_trace.last_updated_by as last_updated_by,
+                multiIf(
+                    LENGTH(old_trace.thread_id) > 0, old_trace.thread_id,
+                    new_trace.thread_id
+                ) as thread_id
             FROM (
                 SELECT
                     :id as id,
@@ -560,14 +700,15 @@ class TraceDAOImpl implements TraceDAO {
                     <if(error_info)> :error_info <else> '' <endif> as error_info,
                     now64(9) as created_at,
                     :user_name as created_by,
-                    :user_name as last_updated_by
+                    :user_name as last_updated_by,
+                    <if(thread_id)> :thread_id <else> '' <endif> as thread_id
             ) as new_trace
             LEFT JOIN (
                 SELECT
                     *
                 FROM traces
                 WHERE id = :id
-                ORDER BY id DESC, last_updated_at DESC
+                ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                 LIMIT 1
             ) as old_trace
             ON new_trace.id = old_trace.id
@@ -584,158 +725,285 @@ class TraceDAOImpl implements TraceDAO {
             GROUP BY t.project_id
             ;
             """;
-    private static final String SELECT_PROJECT_ID_FROM_TRACES = """
+    private static final String SELECT_PROJECT_ID_FROM_TRACE = """
             SELECT
-                id,
-                project_id
+                DISTINCT project_id
             FROM traces
-            WHERE id IN :ids
+            WHERE id = :id
             AND workspace_id = :workspace_id
-            ORDER BY id DESC, last_updated_at DESC
-            LIMIT 1 BY id
             ;
             """;
 
     private static final String SELECT_TRACES_STATS = """
-            SELECT
-                *
-            FROM (
+             WITH spans_agg AS (
                 SELECT
-                    project_id as project_id,
-                    count(DISTINCT trace_id) as trace_count,
-                    arrayMap(v -> toDecimal64(if(isNaN(v), 0, v), 9), quantiles(0.5, 0.9, 0.99)(duration)) AS duration,
-                    sum(input_count) as input,
-                    sum(output_count) as output,
-                    sum(metadata_count) as metadata,
-                    avg(tags_count) as tags,
-                    avgMap(usage) as usage,
-                    avgMap(feedback_scores) AS feedback_scores,
-                    avgIf(total_estimated_cost, total_estimated_cost > 0) AS total_estimated_cost_,
-                    toDecimal64(if(isNaN(total_estimated_cost_), 0, total_estimated_cost_), 8) AS total_estimated_cost_avg
+                    workspace_id,
+                    project_id,
+                    trace_id,
+                    sumMap(usage) as usage,
+                    sum(total_estimated_cost) as total_estimated_cost
                 FROM (
                     SELECT
-                        t.workspace_id as workspace_id,
-                        t.project_id as project_id,
-                        t.id as trace_id,
-                        t.duration_millis as duration,
-                        t.input_count as input_count,
-                        t.output_count as output_count,
-                        t.metadata_count as metadata_count,
-                        t.tags_count as tags_count,
-                        s.usage as usage,
-                        f.feedback_scores as feedback_scores,
-                        s.total_estimated_cost as total_estimated_cost
-                    FROM (
-                        SELECT
-                             workspace_id,
-                             project_id,
-                             id,
-                             if(end_time IS NOT NULL AND start_time IS NOT NULL
-                                         AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
-                                     (dateDiff('microsecond', start_time, end_time) / 1000.0),
-                                     NULL) AS duration_millis,
-                             if(length(input) > 0, 1, 0) as input_count,
-                             if(length(output) > 0, 1, 0) as output_count,
-                             if(length(metadata) > 0, 1, 0) as metadata_count,
-                             length(tags) as tags_count
-                        FROM traces
-                        WHERE project_id = :project_id
-                        AND workspace_id = :workspace_id
-                        <if(filters)> AND <filters> <endif>
-                        <if(feedback_scores_filters)>
-                        AND id IN (
-                            SELECT
-                                entity_id
-                            FROM (
-                                SELECT *
-                                FROM feedback_scores
-                                WHERE entity_type = 'trace'
-                                AND workspace_id = :workspace_id
-                                AND project_id = :project_id
-                                ORDER BY entity_id DESC, last_updated_at DESC
-                                LIMIT 1 BY entity_id, name
-                            )
-                            GROUP BY entity_id
-                            HAVING <feedback_scores_filters>
-                        )
-                        <endif>
-                        <if(trace_aggregation_filters)>
-                        AND id IN (
-                            SELECT
-                                trace_id
-                            FROM (
-                                SELECT
-                                    trace_id,
-                                    sumMap(usage) as usage,
-                                    sum(total_estimated_cost) as total_estimated_cost
-                                FROM (
-                                    SELECT
-                                        trace_id,
-                                        usage,
-                                        total_estimated_cost
-                                    FROM spans
-                                    WHERE workspace_id = :workspace_id
-                                    AND project_id = :project_id
-                                    ORDER BY id DESC, last_updated_at DESC
-                                    LIMIT 1 BY id
-                                )
-                                GROUP BY trace_id
-                                HAVING <trace_aggregation_filters>
-                            )
-                        )
-                        <endif>
-                        ORDER BY id DESC, last_updated_at DESC
-                        LIMIT 1 BY id
-                    ) AS t
-                    LEFT JOIN (
-                        SELECT
-                            trace_id,
-                            sumMap(usage) as usage,
-                            sum(total_estimated_cost) as total_estimated_cost
-                        FROM (
-                            SELECT
-                                trace_id,
-                                usage,
-                                total_estimated_cost
-                            FROM spans
-                            WHERE workspace_id = :workspace_id
-                            AND project_id = :project_id
-                            ORDER BY id DESC, last_updated_at DESC
-                            LIMIT 1 BY id
-                        )
-                        GROUP BY trace_id
-                    ) AS s ON t.id = s.trace_id
-                    LEFT JOIN (
-                        SELECT
-                            project_id,
-                            entity_id,
-                            mapFromArrays(
-                                groupArray(name),
-                                groupArray(value)
-                            ) as feedback_scores
-                        FROM (
-                            SELECT
-                                project_id,
-                                entity_id,
-                                name,
-                                value
-                            FROM feedback_scores
-                            WHERE entity_type = 'trace'
-                            AND workspace_id = :workspace_id
-                            AND project_id = :project_id
-                            ORDER BY entity_id DESC, last_updated_at DESC
-                            LIMIT 1 BY entity_id, name
-                        ) GROUP BY  project_id, entity_id
-                    ) as f ON t.id = f.entity_id
+                        workspace_id,
+                        project_id,
+                        trace_id,
+                        usage,
+                        total_estimated_cost
+                    FROM spans
+                    WHERE workspace_id = :workspace_id
+                    AND project_id IN :project_ids
+                    ORDER BY (workspace_id, project_id, trace_id, parent_span_id, id) DESC, last_updated_at DESC
+                    LIMIT 1 BY id
                 )
-                GROUP BY project_id
-            ) AS stats
+                GROUP BY workspace_id, project_id, trace_id
+            ), feedback_scores_agg AS (
+                SELECT
+                    workspace_id,
+                    project_id,
+                    entity_id,
+                    mapFromArrays(
+                        groupArray(name),
+                        groupArray(value)
+                    ) as feedback_scores
+                FROM (
+                    SELECT
+                        workspace_id,
+                        project_id,
+                        entity_id,
+                        name,
+                        value
+                    FROM feedback_scores
+                    WHERE entity_type = 'trace'
+                    AND workspace_id = :workspace_id
+                    AND project_id IN :project_ids
+                    ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
+                    LIMIT 1 BY entity_id, name
+                )
+                GROUP BY workspace_id, project_id, entity_id
+            )
+            <if(feedback_scores_empty_filters)>
+            , fsc AS (SELECT entity_id, COUNT(entity_id) AS feedback_scores_count
+                 FROM (
+                    SELECT *
+                    FROM feedback_scores
+                    WHERE entity_type = 'trace'
+                    AND workspace_id = :workspace_id
+                    AND project_id IN :project_ids
+                    ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
+                    LIMIT 1 BY entity_id, name
+                 )
+                 GROUP BY entity_id
+                 HAVING <feedback_scores_empty_filters>
+            )
+            <endif>
+            SELECT
+                t.workspace_id as workspace_id,
+                t.project_id as project_id,
+                countDistinct(t.id) AS trace_count,
+                arrayMap(v -> toDecimal64(if(isNaN(v), 0, v), 9), quantiles(0.5, 0.9, 0.99)(t.duration)) AS duration,
+                sum(notEmpty(t.input)) AS input,
+                sum(notEmpty(t.output)) AS output,
+                sum(notEmpty(t.metadata)) AS metadata,
+                avg(length(t.tags)) AS tags,
+                avgMap(s.usage) as usage,
+                avgMap(f.feedback_scores) AS feedback_scores,
+                avgIf(s.total_estimated_cost, s.total_estimated_cost > 0) AS total_estimated_cost_,
+                toDecimal128(if(isNaN(total_estimated_cost_), 0, total_estimated_cost_), 12) AS total_estimated_cost_avg
+            FROM (
+                SELECT
+                    *,
+                    if(end_time IS NOT NULL AND start_time IS NOT NULL
+                            AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
+                        (dateDiff('microsecond', start_time, end_time) / 1000.0),
+                        NULL) as duration
+                FROM traces
+                <if(feedback_scores_empty_filters)>
+                    LEFT JOIN fsc ON fsc.entity_id = traces.id
+                <endif>
+                WHERE workspace_id = :workspace_id
+                AND project_id IN :project_ids
+                <if(filters)> AND <filters> <endif>
+                <if(feedback_scores_filters)>
+                AND id IN (
+                    SELECT
+                        entity_id
+                    FROM (
+                        SELECT *
+                        FROM feedback_scores
+                        WHERE entity_type = 'trace'
+                        AND workspace_id = :workspace_id
+                        AND project_id IN :project_ids
+                        ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
+                        LIMIT 1 BY entity_id, name
+                    )
+                    GROUP BY entity_id
+                    HAVING <feedback_scores_filters>
+                )
+                <endif>
+                <if(trace_aggregation_filters)>
+                AND id IN (
+                    SELECT
+                        trace_id
+                    FROM spans_agg
+                    WHERE <trace_aggregation_filters>
+                )
+                <endif>
+                <if(feedback_scores_empty_filters)>
+                AND fsc.feedback_scores_count = 0
+                <endif>
+                ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
+                LIMIT 1 BY id
+            ) t
+            LEFT JOIN spans_agg AS s ON t.id = s.trace_id
+            LEFT JOIN feedback_scores_agg as f ON t.id = f.entity_id
+            GROUP BY t.workspace_id, t.project_id
+            SETTINGS join_algorithm = 'auto'
+            ;
+            """;
+
+    /***
+     * When treating a list of traces as threads, a number of aggregation are performed to get the thread details.
+     *
+     * Please refer to the SELECT_TRACES_THREAD_BY_ID query for more details.
+     ***/
+    private static final String SELECT_COUNT_TRACES_THREADS_BY_PROJECT_IDS = """
+            SELECT
+                countDistinct(id) as count
+            FROM (
+                SELECT
+                    t.thread_id as id,
+                    t.workspace_id as workspace_id,
+                    t.project_id as project_id
+                    <if(trace_thread_filters)>,
+                    min(t.start_time) as start_time,
+                    max(t.end_time) as end_time,
+                    if(end_time IS NOT NULL AND start_time IS NOT NULL
+                               AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
+                           (dateDiff('microsecond', start_time, end_time) / 1000.0),
+                           NULL) AS duration,
+                    <if(truncate)> replaceRegexpAll(argMin(t.input, t.start_time), '<truncate>', '"[image]"') as first_message <else> argMin(t.input, t.start_time) as first_message<endif>,
+                    <if(truncate)> replaceRegexpAll(argMax(t.output, t.end_time), '<truncate>', '"[image]"') as last_message <else> argMax(t.output, t.end_time) as last_message<endif>,
+                    count(DISTINCT t.id) * 2 as number_of_messages,
+                    max(t.last_updated_at) as last_updated_at,
+                    argMin(t.created_by, t.created_at) as created_by,
+                    min(t.created_at) as created_at
+                    <endif>
+                 FROM (
+                     SELECT
+                         *
+                     FROM traces t
+                     WHERE workspace_id = :workspace_id
+                     AND project_id = :project_id
+                     AND thread_id IS NOT NULL
+                     AND thread_id \\<> ''
+                     ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
+                     LIMIT 1 BY id
+                 ) AS t
+                 GROUP BY
+                    t.workspace_id, t.project_id, t.thread_id
+                 <if(trace_thread_filters)> HAVING <trace_thread_filters> <endif>
+             )
+            ;
+            """;
+
+    /***
+     * When treating a list of traces as threads, a number of aggregation are performed to get the thread details.
+     *
+     * Please refer to the SELECT_TRACES_THREAD_BY_ID query for more details.
+     ***/
+    private static final String SELECT_TRACES_THREADS_BY_PROJECT_IDS = """
+            SELECT
+                t.thread_id as id,
+                t.workspace_id as workspace_id,
+                t.project_id as project_id,
+                min(t.start_time) as start_time,
+                max(t.end_time) as end_time,
+                if(end_time IS NOT NULL AND start_time IS NOT NULL
+                           AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
+                       (dateDiff('microsecond', start_time, end_time) / 1000.0),
+                       NULL) AS duration,
+                <if(truncate)> replaceRegexpAll(argMin(t.input, t.start_time), '<truncate>', '"[image]"') as first_message <else> argMin(t.input, t.start_time) as first_message<endif>,
+                <if(truncate)> replaceRegexpAll(argMax(t.output, t.end_time), '<truncate>', '"[image]"') as last_message <else> argMax(t.output, t.end_time) as last_message<endif>,
+                count(DISTINCT t.id) * 2 as number_of_messages,
+                max(t.last_updated_at) as last_updated_at,
+                argMin(t.created_by, t.created_at) as created_by,
+                min(t.created_at) as created_at
+             FROM (
+                 SELECT
+                     *
+                 FROM traces t
+                 WHERE workspace_id = :workspace_id
+                 AND project_id = :project_id
+                 AND thread_id IS NOT NULL
+                 AND thread_id \\<> ''
+                 ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
+                 LIMIT 1 BY id
+             ) AS t
+             GROUP BY
+                t.workspace_id, t.project_id, t.thread_id
+             <if(trace_thread_filters)> HAVING <trace_thread_filters> <endif>
+             ORDER BY last_updated_at DESC, start_time ASC, end_time DESC
+             LIMIT :limit OFFSET :offset
+             SETTINGS join_algorithm = 'full_sorting_merge'
+            ;
+            """;
+
+    private static final String DELETE_THREADS_BY_PROJECT_ID = """
+            DELETE FROM traces
+            WHERE workspace_id = :workspace_id
+            AND project_id = :project_id
+            AND thread_id IN :thread_ids
+            """;
+
+    /***
+     * When treating a list of traces as threads, a number of aggregation are performed to get the thread details.
+     *
+     * Among the aggregation performed are:
+     *  - The duration of the thread, which is calculated as the difference between the start_time and end_time of the first and last trace in the list.
+     *  - The first message in the thread, which is the input of the first trace in the list.
+     *  - The last message in the thread, which is the output of the last trace in the list.
+     *  - The number of messages in the thread, which is the count of the traces in the list multiplied by 2.
+     *  - The last updated time of the thread, which is the last_updated_at of the last trace in the list.
+     *  - The creator of the thread, which is the created_by of the first trace in the list.
+     *  - The creation time of the thread, which is the created_at of the first trace in the list.
+     ***/
+    private static final String SELECT_TRACES_THREAD_BY_ID = """
+            SELECT
+                t.thread_id as id,
+                t.workspace_id as workspace_id,
+                t.project_id as project_id,
+                min(t.start_time) as start_time,
+                max(t.end_time) as end_time,
+                if(end_time IS NOT NULL AND start_time IS NOT NULL
+                           AND notEquals(start_time, toDateTime64('1970-01-01 00:00:00.000', 9)),
+                       (dateDiff('microsecond', start_time, end_time) / 1000.0),
+                       NULL) AS duration,
+                argMin(t.input, t.start_time) as first_message,
+                argMax(t.output, t.end_time) as last_message,
+                count(DISTINCT t.id) * 2 as number_of_messages,
+                max(t.last_updated_at) as last_updated_at,
+                argMin(t.created_by, t.created_at) as created_by,
+                min(t.created_at) as created_at
+             FROM (
+                 SELECT
+                     *
+                 FROM traces t
+                 WHERE workspace_id = :workspace_id
+                 AND project_id = :project_id
+                 AND thread_id = :thread_id
+                 ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
+                 LIMIT 1 BY id
+             ) AS t
+             GROUP BY
+                t.workspace_id, t.project_id, t.thread_id
             ;
             """;
 
     private final @NonNull FeedbackScoreDAO feedbackScoreDAO;
     private final @NonNull FilterQueryBuilder filterQueryBuilder;
     private final @NonNull TransactionTemplateAsync asyncTemplate;
+    private final @NonNull SortingQueryBuilder sortingQueryBuilder;
+    private final @NonNull TraceSortingFactory sortingFactory;
 
     @Override
     @WithSpan
@@ -792,6 +1060,12 @@ class TraceDAOImpl implements TraceDAO {
             statement.bind("error_info", JsonUtils.readTree(trace.errorInfo()).toString());
         } else {
             statement.bind("error_info", "");
+        }
+
+        if (trace.threadId() != null) {
+            statement.bind("thread_id", trace.threadId());
+        } else {
+            statement.bind("thread_id", "");
         }
 
         return statement;
@@ -853,6 +1127,9 @@ class TraceDAOImpl implements TraceDAO {
 
         Optional.ofNullable(traceUpdate.endTime())
                 .ifPresent(endTime -> statement.bind("end_time", endTime.toString()));
+
+        Optional.ofNullable(traceUpdate.threadId())
+                .ifPresent(threadId -> statement.bind("thread_id", threadId));
     }
 
     private ST buildUpdateTemplate(TraceUpdate traceUpdate, String update) {
@@ -876,6 +1153,9 @@ class TraceDAOImpl implements TraceDAO {
         Optional.ofNullable(traceUpdate.errorInfo())
                 .ifPresent(errorInfo -> template.add("error_info", JsonUtils.readTree(errorInfo).toString()));
 
+        Optional.ofNullable(traceUpdate.threadId())
+                .ifPresent(threadId -> template.add("thread_id", threadId));
+
         return template;
     }
 
@@ -886,6 +1166,16 @@ class TraceDAOImpl implements TraceDAO {
         Segment segment = startSegment("traces", "Clickhouse", "getById");
 
         return makeFluxContextAware(bindWorkspaceIdToFlux(statement))
+                .doFinally(signalType -> endSegment(segment));
+    }
+
+    private Flux<? extends Result> getDetailsById(UUID id, Connection connection) {
+        var statement = connection.createStatement(SELECT_DETAILS_BY_ID)
+                .bind("id", id);
+
+        Segment segment = startSegment("traces", "Clickhouse", "getDetailsById");
+
+        return Flux.from(statement.execute())
                 .doFinally(signalType -> endSegment(segment));
     }
 
@@ -918,6 +1208,13 @@ class TraceDAOImpl implements TraceDAO {
                 .singleOrEmpty();
     }
 
+    @Override
+    public Mono<TraceDetails> getTraceDetailsById(@NonNull UUID id, @NonNull Connection connection) {
+        return getDetailsById(id, connection)
+                .flatMap(this::mapToTraceDetails)
+                .singleOrEmpty();
+    }
+
     private Publisher<Trace> mapToDto(Result result) {
         return result.map((row, rowMetadata) -> Trace.builder()
                 .id(row.get("id", UUID.class))
@@ -941,6 +1238,7 @@ class TraceDAOImpl implements TraceDAO {
                         .collect(Collectors.toSet()))
                         .filter(it -> !it.isEmpty())
                         .orElse(null))
+                .comments(getComments(row.get("comments", List[].class)))
                 .usage(row.get("usage", Map.class))
                 .totalEstimatedCost(row.get("total_estimated_cost", BigDecimal.class).compareTo(BigDecimal.ZERO) == 0
                         ? null
@@ -953,7 +1251,17 @@ class TraceDAOImpl implements TraceDAO {
                 .lastUpdatedAt(row.get("last_updated_at", Instant.class))
                 .createdBy(row.get("created_by", String.class))
                 .lastUpdatedBy(row.get("last_updated_by", String.class))
-                .duration(row.get("duration_millis", Double.class))
+                .duration(row.get("duration", Double.class))
+                .threadId(Optional.ofNullable(row.get("thread_id", String.class))
+                        .filter(StringUtils::isNotEmpty)
+                        .orElse(null))
+                .build());
+    }
+
+    private Publisher<TraceDetails> mapToTraceDetails(Result result) {
+        return result.map((row, rowMetadata) -> TraceDetails.builder()
+                .projectId(row.get("project_id", String.class))
+                .workspaceId(row.get("workspace_id", String.class))
                 .build());
     }
 
@@ -967,7 +1275,8 @@ class TraceDAOImpl implements TraceDAO {
                         .flatMapMany(this::mapToDto)
                         .collectList()
                         .flatMap(this::enhanceWithFeedbackLogs)
-                        .map(traces -> new TracePage(page, traces.size(), total, traces)));
+                        .map(traces -> new TracePage(page, traces.size(), total, traces,
+                                sortingFactory.getSortableFields())));
     }
 
     @Override
@@ -1009,6 +1318,11 @@ class TraceDAOImpl implements TraceDAO {
     private Mono<? extends Result> getTracesByProjectId(
             int size, int page, TraceSearchCriteria traceSearchCriteria, Connection connection) {
         var template = newFindTemplate(SELECT_BY_PROJECT_ID, traceSearchCriteria);
+
+        var finalTemplate = template;
+        Optional.ofNullable(sortingQueryBuilder.toOrderBySql(traceSearchCriteria.sortingFields()))
+                .ifPresent(sortFields -> finalTemplate.add("sort_fields", sortFields));
+
         template = ImageUtils.addTruncateToTemplate(template, traceSearchCriteria.truncate());
         var statement = connection.createStatement(template.render())
                 .bind("project_id", traceSearchCriteria.projectId())
@@ -1024,6 +1338,7 @@ class TraceDAOImpl implements TraceDAO {
 
     private Mono<? extends Result> countTotal(TraceSearchCriteria traceSearchCriteria, Connection connection) {
         var template = newFindTemplate(COUNT_BY_PROJECT_ID, traceSearchCriteria);
+
         var statement = connection.createStatement(template.render())
                 .bind("project_id", traceSearchCriteria.projectId());
 
@@ -1046,6 +1361,11 @@ class TraceDAOImpl implements TraceDAO {
                                     traceAggregationFilters));
                     filterQueryBuilder.toAnalyticsDbFilters(filters, FilterStrategy.FEEDBACK_SCORES)
                             .ifPresent(scoresFilters -> template.add("feedback_scores_filters", scoresFilters));
+                    filterQueryBuilder.toAnalyticsDbFilters(filters, FilterStrategy.TRACE_THREAD)
+                            .ifPresent(threadFilters -> template.add("trace_thread_filters", threadFilters));
+                    filterQueryBuilder.toAnalyticsDbFilters(filters, FilterStrategy.FEEDBACK_SCORES_IS_EMPTY)
+                            .ifPresent(feedbackScoreIsEmptyFilters -> template.add("feedback_scores_empty_filters",
+                                    feedbackScoreIsEmptyFilters));
                 });
         return template;
     }
@@ -1056,7 +1376,8 @@ class TraceDAOImpl implements TraceDAO {
                     filterQueryBuilder.bind(statement, filters, FilterStrategy.TRACE);
                     filterQueryBuilder.bind(statement, filters, FilterStrategy.TRACE_AGGREGATION);
                     filterQueryBuilder.bind(statement, filters, FilterStrategy.FEEDBACK_SCORES);
-                    filterQueryBuilder.bind(statement, filters, FilterStrategy.DURATION);
+                    filterQueryBuilder.bind(statement, filters, FilterStrategy.TRACE_THREAD);
+                    filterQueryBuilder.bind(statement, filters, FilterStrategy.FEEDBACK_SCORES_IS_EMPTY);
                 });
     }
 
@@ -1116,7 +1437,8 @@ class TraceDAOImpl implements TraceDAO {
                         .bind("metadata" + i, getOrDefault(trace.metadata()))
                         .bind("tags" + i, trace.tags() != null ? trace.tags().toArray(String[]::new) : new String[]{})
                         .bind("error_info" + i,
-                                trace.errorInfo() != null ? JsonUtils.readTree(trace.errorInfo()).toString() : "");
+                                trace.errorInfo() != null ? JsonUtils.readTree(trace.errorInfo()).toString() : "")
+                        .bind("thread_id" + i, trace.threadId() != null ? trace.threadId() : "");
 
                 if (trace.endTime() != null) {
                     statement.bind("end_time" + i, trace.endTime().toString());
@@ -1174,7 +1496,7 @@ class TraceDAOImpl implements TraceDAO {
             ST statsSQL = newFindTemplate(SELECT_TRACES_STATS, criteria);
 
             var statement = connection.createStatement(statsSQL.render())
-                    .bind("project_id", criteria.projectId());
+                    .bind("project_ids", List.of(criteria.projectId()));
 
             bindSearchCriteria(criteria, statement);
 
@@ -1195,6 +1517,98 @@ class TraceDAOImpl implements TraceDAO {
                         connection -> Mono.from(connection.createStatement(TRACE_COUNT_BY_WORKSPACE_ID).execute()))
                 .flatMapMany(result -> result.map((row, rowMetadata) -> row.get("trace_count", Long.class)))
                 .reduce(0L, Long::sum);
+    }
+
+    @Override
+    public Mono<Map<UUID, ProjectStats>> getStatsByProjectIds(@NonNull List<UUID> projectIds,
+            @NonNull String workspaceId) {
+
+        if (projectIds.isEmpty()) {
+            return Mono.just(Map.of());
+        }
+
+        return asyncTemplate
+                .nonTransaction(connection -> {
+                    Statement statement = connection.createStatement(new ST(SELECT_TRACES_STATS).render())
+                            .bind("project_ids", projectIds)
+                            .bind("workspace_id", workspaceId);
+
+                    return Mono.from(statement.execute())
+                            .flatMapMany(result -> result.map((row, rowMetadata) -> Map.of(
+                                    row.get("project_id", UUID.class),
+                                    StatsMapper.mapProjectStats(row, "trace_count"))))
+                            .map(Map::entrySet)
+                            .flatMap(Flux::fromIterable)
+                            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                });
+    }
+
+    private Mono<Long> countThreadTotal(TraceSearchCriteria traceSearchCriteria, Connection connection) {
+        var template = newFindTemplate(SELECT_COUNT_TRACES_THREADS_BY_PROJECT_IDS, traceSearchCriteria);
+
+        var statement = connection.createStatement(template.render())
+                .bind("project_id", traceSearchCriteria.projectId());
+
+        bindSearchCriteria(traceSearchCriteria, statement);
+
+        Segment segment = startSegment("traces", "Clickhouse", "countThreads");
+
+        return makeMonoContextAware(bindWorkspaceIdToMono(statement))
+                .doFinally(signalType -> endSegment(segment))
+                .flatMapMany(result -> result.map((row, rowMetadata) -> row.get("count", Long.class)))
+                .reduce(0L, Long::sum);
+    }
+
+    @Override
+    public Mono<TraceThreadPage> findThreads(int size, int page, @NonNull TraceSearchCriteria criteria) {
+
+        return asyncTemplate.nonTransaction(connection -> {
+            return countThreadTotal(criteria, connection)
+                    .flatMap(count -> {
+
+                        ST template = newFindTemplate(SELECT_TRACES_THREADS_BY_PROJECT_IDS, criteria);
+
+                        template = ImageUtils.addTruncateToTemplate(template, criteria.truncate());
+
+                        var statement = connection.createStatement(template.render())
+                                .bind("project_id", criteria.projectId())
+                                .bind("limit", size)
+                                .bind("offset", (page - 1) * size);
+
+                        bindSearchCriteria(criteria, statement);
+
+                        Segment segment = startSegment("traces", "Clickhouse", "findThreads");
+
+                        return makeFluxContextAware(bindWorkspaceIdToFlux(statement))
+                                .flatMap(this::mapThreadToDto)
+                                .collectList()
+                                .doFinally(signalType -> endSegment(segment))
+                                .map(threads -> new TraceThreadPage(page, threads.size(), count, threads));
+                    });
+        });
+    }
+
+    private Publisher<TraceThread> mapThreadToDto(Result result) {
+        return result.map((row, rowMetadata) -> TraceThread.builder()
+                .id(row.get("id", String.class))
+                .workspaceId(row.get("workspace_id", String.class))
+                .projectId(row.get("project_id", UUID.class))
+                .startTime(row.get("start_time", Instant.class))
+                .endTime(row.get("end_time", Instant.class))
+                .duration(row.get("duration", Double.class))
+                .firstMessage(Optional.ofNullable(row.get("first_message", String.class))
+                        .filter(it -> !it.isBlank())
+                        .map(JsonUtils::getJsonNodeFromString)
+                        .orElse(null))
+                .lastMessage(Optional.ofNullable(row.get("last_message", String.class))
+                        .filter(it -> !it.isBlank())
+                        .map(JsonUtils::getJsonNodeFromString)
+                        .orElse(null))
+                .numberOfMessages(row.get("number_of_messages", Long.class))
+                .lastUpdatedAt(row.get("last_updated_at", Instant.class))
+                .createdBy(row.get("created_by", String.class))
+                .createdAt(row.get("created_at", Instant.class))
+                .build());
     }
 
     @Override
@@ -1220,21 +1634,50 @@ class TraceDAOImpl implements TraceDAO {
     }
 
     @Override
-    public Mono<Map<UUID, UUID>> getProjectIdFromTraces(@NonNull Set<UUID> traceIds) {
-
-        if (traceIds.isEmpty()) {
-            return Mono.just(Map.of());
-        }
+    public Mono<UUID> getProjectIdFromTrace(@NonNull UUID traceId) {
 
         return asyncTemplate.nonTransaction(connection -> {
-            var statement = connection.createStatement(SELECT_PROJECT_ID_FROM_TRACES)
-                    .bind("ids", traceIds.toArray(UUID[]::new));
+            var statement = connection.createStatement(SELECT_PROJECT_ID_FROM_TRACE)
+                    .bind("id", traceId);
 
-            return makeFluxContextAware(bindWorkspaceIdToFlux(statement))
-                    .flatMap(result -> result.map((row, rowMetadata) -> Map.entry(
-                            row.get("id", UUID.class),
-                            row.get("project_id", UUID.class))))
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            return makeMonoContextAware(bindWorkspaceIdToMono(statement))
+                    .flatMapMany(result -> result.map((row, rowMetadata) -> row.get("project_id", UUID.class)))
+                    .singleOrEmpty();
         });
     }
+
+    @Override
+    public Mono<Long> deleteThreads(@NonNull UUID projectId, @NonNull List<String> threadIds) {
+        Preconditions.checkArgument(!threadIds.isEmpty(), "threadIds must not be empty");
+
+        return asyncTemplate.nonTransaction(connection -> {
+            var statement = connection.createStatement(DELETE_THREADS_BY_PROJECT_ID)
+                    .bind("project_id", projectId)
+                    .bind("thread_ids", threadIds.toArray(String[]::new));
+
+            Segment segment = startSegment("traces", "Clickhouse", "deleteThreads");
+
+            return makeMonoContextAware(bindWorkspaceIdToMono(statement))
+                    .doFinally(signalType -> endSegment(segment))
+                    .flatMapMany(Result::getRowsUpdated)
+                    .reduce(0L, Long::sum);
+        });
+    }
+
+    @Override
+    public Mono<TraceThread> findThreadById(@NonNull UUID projectId, @NonNull String threadId) {
+        return asyncTemplate.nonTransaction(connection -> {
+            var statement = connection.createStatement(SELECT_TRACES_THREAD_BY_ID)
+                    .bind("project_id", projectId)
+                    .bind("thread_id", threadId);
+
+            Segment segment = startSegment("traces", "Clickhouse", "findThreadById");
+
+            return makeMonoContextAware(bindWorkspaceIdToMono(statement))
+                    .flatMapMany(this::mapThreadToDto)
+                    .singleOrEmpty()
+                    .doFinally(signalType -> endSegment(segment));
+        });
+    }
+
 }

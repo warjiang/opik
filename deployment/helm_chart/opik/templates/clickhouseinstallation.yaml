@@ -1,3 +1,4 @@
+{{- if .Values.clickhouse.enabled }}
 apiVersion: clickhouse.altinity.com/v1
 kind: ClickHouseInstallation
 metadata:
@@ -41,6 +42,20 @@ spec:
       {{ .Values.clickhouse.monitoring.username }}/readonly: 1
     {{- end }}
 
+    {{- if .Values.clickhouse.configuration }}
+    {{- with .Values.clickhouse.configuration.additional_configuration }}
+    {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- end }}
+
+    files:
+      config.d/logger.xml: "<yandex><logger><level>{{ .Values.clickhouse.logsLevel }}</level></logger></yandex>"
+      {{- if .Values.clickhouse.configuration }}
+      {{- with .Values.clickhouse.configuration.files }}
+      {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- end }}
+    
     {{- if .Values.zookeeper.enabled }}
     zookeeper:
         nodes:
@@ -63,6 +78,10 @@ spec:
           containers:
           - name: clickhouse
             image: {{ .Values.clickhouse.image }}
+            {{- with .Values.clickhouse.imagePullSecrets }}
+            imagePullSecrets:
+              {{- toYaml . | nindent 8 }}
+            {{- end }}
             {{- with .Values.clickhouse.resources }}
             resources:
               {{- toYaml . | nindent 14 }}
@@ -101,6 +120,13 @@ spec:
 
     volumeClaimTemplates:
       - name: storage-vc-template
+        {{- if .Values.clickhouse.volumeAnnotations }}
+        metadata:
+          annotations:
+        {{- with .Values.clickhouse.volumeAnnotations }}
+            {{- toYaml . | nindent 12 }}
+        {{- end }}
+        {{- end }}
         spec:
           {{- if .Values.clickhouse.storageClassName }}
           storageClassName:  {{ .Values.clickhouse.storageClassName }}
@@ -110,3 +136,4 @@ spec:
           resources:
             requests:
               storage: {{ .Values.clickhouse.storage }}    
+{{- end }}

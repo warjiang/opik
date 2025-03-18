@@ -1,17 +1,18 @@
 import contextlib
-import os
 import contextvars
+import os
 from typing import Any, Dict, Iterator, List, Optional, Union
 
-from haystack import logging
-from haystack.components.generators import openai_utils
 from haystack import dataclasses as haystack_dataclasses
-from haystack import tracing
+from haystack import logging, tracing
 from haystack.tracing import utils as tracing_utils
 
 import opik
+from opik import url_helpers
 from opik.api_objects import span as opik_span
 from opik.api_objects import trace as opik_trace
+
+from . import converters
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ class OpikSpanBridge(tracing.Span):
             value: The tag value.
         """
         coerced_value = tracing_utils.coerce_tag_value(value)
-        self._span.update(metadata={key: coerced_value})
+        self._span.update(metadata={key: coerced_value, "created_from": "haystack"})
         self._data[key] = value
 
     def set_content_tag(self, key: str, value: Any) -> None:
@@ -90,8 +91,8 @@ class OpikSpanBridge(tracing.Span):
         if key.endswith(".input"):
             if "messages" in value:
                 messages = [
-                    openai_utils._convert_message_to_openai_format(m)
-                    for m in value["messages"]
+                    converters.convert_message_to_openai_format(message)
+                    for message in value["messages"]
                 ]
                 self._span.update(input={"input": messages})
             else:
@@ -99,12 +100,12 @@ class OpikSpanBridge(tracing.Span):
         elif key.endswith(".output"):
             if "replies" in value:
                 if all(
-                    isinstance(r, haystack_dataclasses.ChatMessage)
-                    for r in value["replies"]
+                    isinstance(reply, haystack_dataclasses.ChatMessage)
+                    for reply in value["replies"]
                 ):
                     replies = [
-                        openai_utils._convert_message_to_openai_format(m)
-                        for m in value["replies"]
+                        converters.convert_message_to_openai_format(message)
+                        for message in value["replies"]
                     ]
                 else:
                     replies = value["replies"]
@@ -249,9 +250,17 @@ class OpikTracer(tracing.Tracer):
 
         if last_span is None:
             return ""
-        else:
-            project_name = last_span.raw_span()._project_name
-            return self._opik_client.get_project_url(project_name)
+
+        opik_span_or_trace = last_span.raw_span()
+        trace_id = (
+            opik_span_or_trace.id
+            if isinstance(opik_span_or_trace, opik.Trace)
+            else opik_span_or_trace.id
+        )
+
+        return url_helpers.get_project_url_by_trace_id(
+            trace_id=trace_id, url_override=self._opik_client.config.url_override
+        )
 
     def get_trace_id(self) -> Optional[str]:
         """

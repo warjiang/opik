@@ -21,6 +21,9 @@ module.exports = {
     extend: {
       fontFamily: {
         sans: ["Inter", ...fontFamily.sans],
+        code: [
+          `Ubuntu Mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace`,
+        ],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -32,6 +35,9 @@ module.exports = {
         warning: "hsl(var(--warning))",
         success: "hsl(var(--success))",
         "light-slate": "hsl(var(--lite-slate))",
+        soft: {
+          background: "#FCFCFD",
+        },
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
@@ -60,6 +66,7 @@ module.exports = {
         },
         popover: {
           DEFAULT: "hsl(var(--popover))",
+          gray: "hsl(var(--popover-gray))",
           foreground: "hsl(var(--popover-foreground))",
         },
         tooltip: {
@@ -92,5 +99,20 @@ module.exports = {
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    require("@tailwindcss/typography"),
+    function ({ addVariant, e }) {
+      addVariant(
+        "group-hover-except-self",
+        ({ modifySelectors, separator }) => {
+          modifySelectors(({ className }) => {
+            return `.group:hover .${e(
+              `group-hover-except-self${separator}${className}`,
+            )}:not(:hover)`;
+          });
+        },
+      );
+    },
+  ],
 };

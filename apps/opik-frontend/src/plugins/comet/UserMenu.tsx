@@ -12,7 +12,10 @@ import {
   Shield,
   UserPlus,
 } from "lucide-react";
+import { useState } from "react";
 
+import QuickstartDialog from "@/components/pages-shared/onboarding/QuickstartDialog/QuickstartDialog";
+import TooltipWrapper from "@/components/shared/TooltipWrapper/TooltipWrapper";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,8 +32,8 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import TooltipWrapper from "@/components/shared/TooltipWrapper/TooltipWrapper";
 import { useToast } from "@/components/ui/use-toast";
+import { APP_VERSION } from "@/constants/app";
 import { buildDocsUrl, cn, maskAPIKey } from "@/lib/utils";
 import useAppStore from "@/store/AppStore";
 import api from "./api";
@@ -39,19 +42,30 @@ import useOrganizations from "./useOrganizations";
 import useUser from "./useUser";
 import useUserPermissions from "./useUserPermissions";
 import { buildUrl } from "./utils";
-import { APP_VERSION } from "@/constants/app";
+
+import useAllWorkspaces from "@/plugins/comet/useAllWorkspaces";
+import useUserInvitedWorkspaces from "@/plugins/comet/useUserInvitedWorkspaces";
 
 const UserMenu = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [openQuickstart, setOpenQuickstart] = useState(false);
   const workspaceName = useAppStore((state) => state.activeWorkspaceName);
   const { data: user } = useUser();
   const { data: organizations, isLoading } = useOrganizations({
     enabled: !!user?.loggedIn,
   });
 
-  const workspace = user?.getTeams.teams.find(
-    (team) => team.teamName === workspaceName,
+  const { data: userInvitedWorkspaces } = useUserInvitedWorkspaces({
+    enabled: !!user?.loggedIn,
+  });
+
+  const { data: allWorkspaces } = useAllWorkspaces({
+    enabled: !!user?.loggedIn,
+  });
+
+  const workspace = allWorkspaces?.find(
+    (workspace) => workspace.workspaceName === workspaceName,
   );
 
   const { data: userPermissions } = useUserPermissions(
@@ -67,7 +81,9 @@ const UserMenu = () => {
     !user.loggedIn ||
     isLoading ||
     !organizations ||
-    !userPermissions
+    !userPermissions ||
+    !allWorkspaces ||
+    !userInvitedWorkspaces
   ) {
     return null;
   }
@@ -83,9 +99,11 @@ const UserMenu = () => {
   const organization = organizations.find((org) => {
     return org.id === workspace?.organizationId;
   });
-  const organizationTeams = user.getTeams.teams.filter(
-    (team) => team.organizationId === organization?.id,
+
+  const organizationUserWorkspaces = userInvitedWorkspaces.filter(
+    (workspace) => workspace.organizationId === organization?.id,
   );
+
   const isOrganizationAdmin =
     organization?.role === ORGANIZATION_ROLE_TYPE.admin;
   const workspacePermissions = userPermissions.find(
@@ -98,18 +116,18 @@ const UserMenu = () => {
     isOrganizationAdmin || invitePermission?.permissionValue === "true";
 
   const handleChangeOrganization = (newOrganization: Organization) => {
-    const newOrganizationTeams = user.getTeams.teams.filter(
-      (team) => team.organizationId === newOrganization.id,
+    const newOrganizationWorkspaces = allWorkspaces.filter(
+      (workspace) => workspace.organizationId === newOrganization.id,
     );
 
     const newWorkspace =
-      newOrganizationTeams.find((team) => team.default_team) ||
-      newOrganizationTeams[0];
+      newOrganizationWorkspaces.find((workspace) => workspace.default) ||
+      newOrganizationWorkspaces[0];
 
     if (newWorkspace) {
       navigate({
         to: "/$workspaceName",
-        params: { workspaceName: newWorkspace.teamName },
+        params: { workspaceName: newWorkspace.workspaceName },
       });
     }
   };
@@ -181,17 +199,24 @@ const UserMenu = () => {
               <DropdownMenuPortal>
                 <DropdownMenuSubContent className="w-60">
                   <div className="max-h-[200px] overflow-auto">
-                    {sortBy(organizationTeams, "teamName").map((team) => (
-                      <Link key={team.teamName} to={`/${team.teamName}`}>
-                        <DropdownMenuCheckboxItem
-                          checked={workspaceName === team.teamName}
+                    {sortBy(organizationUserWorkspaces, "workspaceName").map(
+                      (workspace) => (
+                        <Link
+                          key={workspace.workspaceName}
+                          to={`/${workspace.workspaceName}`}
                         >
-                          <TooltipWrapper content={team.teamName}>
-                            <span className="truncate">{team.teamName}</span>
-                          </TooltipWrapper>
-                        </DropdownMenuCheckboxItem>
-                      </Link>
-                    ))}
+                          <DropdownMenuCheckboxItem
+                            checked={workspaceName === workspace.workspaceName}
+                          >
+                            <TooltipWrapper content={workspace.workspaceName}>
+                              <span className="truncate">
+                                {workspace.workspaceName}
+                              </span>
+                            </TooltipWrapper>
+                          </DropdownMenuCheckboxItem>
+                        </Link>
+                      ),
+                    )}
                   </div>
                   <DropdownMenuSeparator />
                   <a
@@ -262,7 +287,7 @@ const UserMenu = () => {
                 href={buildUrl(
                   "account-settings/workspaces",
                   workspaceName,
-                  `&initialInviteId=${workspace?.teamId}`,
+                  `&initialInviteId=${workspace?.workspaceId}`,
                 )}
               >
                 <DropdownMenuItem className="cursor-pointer">
@@ -274,12 +299,13 @@ const UserMenu = () => {
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>
-            <Link to="/$workspaceName/quickstart" params={{ workspaceName }}>
-              <DropdownMenuItem className="cursor-pointer">
-                <GraduationCap className="mr-2 size-4" />
-                <span>Quickstart guide</span>
-              </DropdownMenuItem>
-            </Link>
+            <DropdownMenuItem
+              onClick={() => setOpenQuickstart(true)}
+              className="cursor-pointer"
+            >
+              <GraduationCap className="mr-2 size-4" />
+              <span>Quickstart guide</span>
+            </DropdownMenuItem>
             <a href={buildDocsUrl()} target="_blank" rel="noreferrer">
               <DropdownMenuItem className="cursor-pointer">
                 <Book className="mr-2 size-4" />
@@ -358,6 +384,8 @@ const UserMenu = () => {
     <div className="flex shrink-0 items-center gap-4">
       {renderAppSelector()}
       {renderUserMenu()}
+
+      <QuickstartDialog open={openQuickstart} setOpen={setOpenQuickstart} />
     </div>
   );
 };

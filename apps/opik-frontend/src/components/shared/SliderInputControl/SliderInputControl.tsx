@@ -75,6 +75,7 @@ const SliderInputControl = ({
   };
 
   const handleResetValue = () => {
+    onChange(defaultValue);
     setLocalValue(defaultValue.toString());
   };
 
@@ -93,7 +94,7 @@ const SliderInputControl = ({
         <div className="flex items-center">
           {numLocalValue !== defaultValue && (
             <Button variant="minimal" size="icon-sm" onClick={handleResetValue}>
-              <RotateCcw className="size-3.5" />
+              <RotateCcw />
             </Button>
           )}
           <Input
@@ -118,8 +119,14 @@ const SliderInputControl = ({
         onValueChange={(values) => {
           setLocalValue(values[0].toString());
         }}
-        onValueCommit={(values) => {
-          onChange(Number(values[0]));
+        onValueCommit={(values) => onChange(Number(values[0]))}
+        // used 'onLostPointerCapture' in addition to 'onValueCommit', because the last doesn't work properly for trackpads
+        // details https://github.com/radix-ui/primitives/issues/1760
+        onLostPointerCapture={() => {
+          const valueToCommit = Number(localValue);
+          if (value !== valueToCommit) {
+            onChange(valueToCommit);
+          }
         }}
         min={min}
         max={max}

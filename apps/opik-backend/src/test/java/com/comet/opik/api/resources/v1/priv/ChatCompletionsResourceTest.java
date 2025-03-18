@@ -11,18 +11,29 @@ import com.comet.opik.api.resources.utils.TestDropwizardAppExtensionUtils;
 import com.comet.opik.api.resources.utils.WireMockUtils;
 import com.comet.opik.api.resources.utils.resources.ChatCompletionsClient;
 import com.comet.opik.api.resources.utils.resources.LlmProviderApiKeyResourceClient;
+import com.comet.opik.domain.llm.LlmProviderFactory;
+import com.comet.opik.extensions.DropwizardAppExtensionProvider;
+import com.comet.opik.extensions.RegisterApp;
+import com.comet.opik.infrastructure.llm.antropic.AnthropicModelName;
+import com.comet.opik.infrastructure.llm.gemini.GeminiModelName;
+import com.comet.opik.infrastructure.llm.openai.OpenaiModelName;
+import com.comet.opik.infrastructure.llm.openrouter.OpenRouterModelName;
 import com.comet.opik.podam.PodamFactoryUtils;
 import com.redis.testcontainers.RedisContainer;
-import dev.ai4j.openai4j.chat.ChatCompletionModel;
 import dev.ai4j.openai4j.chat.ChatCompletionRequest;
 import dev.ai4j.openai4j.chat.Role;
 import org.apache.http.HttpStatus;
 import org.jdbi.v3.core.Jdbi;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.lifecycle.Startables;
@@ -33,27 +44,44 @@ import uk.co.jemos.podam.api.PodamFactory;
 
 import java.sql.SQLException;
 import java.util.UUID;
+import java.util.function.BiConsumer;
+import java.util.stream.Stream;
 
+import static com.comet.opik.domain.llm.ChatCompletionService.ERROR_EMPTY_MESSAGES;
+import static com.comet.opik.domain.llm.ChatCompletionService.ERROR_NO_COMPLETION_TOKENS;
+import static com.comet.opik.domain.llm.LlmProviderFactory.ERROR_MODEL_NOT_SUPPORTED;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assumptions.assumeThat;
+import static org.junit.jupiter.api.Named.named;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
+/// For some providers, the tests need to make actual LLM calls. For that to work, the relevant API keys must be set in
+/// the environment prior to running the tests. If an environment variable for a specific provider is not set, the
+/// relevant test will be skipped for that provider.
+/// - **Openai**: runs against a demo server and doesn't require an API key
+/// - **Anthropic**: set `ANTHROPIC_API_KEY` to your anthropic api key
+/// - **Gemini**: set `GEMINI_API_KEY` to your gemini api key
+/// - **OpenRouter**: set `OPENROUTER_API_KEY` to your OpenRouter api key
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-public class ChatCompletionsResourceTest {
+// Disabled because the tests require an API key to run and this seems to be failing in the CI pipeline
+@ExtendWith(DropwizardAppExtensionProvider.class)
+class ChatCompletionsResourceTest {
 
     private static final String API_KEY = RandomStringUtils.randomAlphanumeric(25);
     private static final String WORKSPACE_ID = UUID.randomUUID().toString();
     private static final String WORKSPACE_NAME = RandomStringUtils.randomAlphanumeric(20);
     private static final String USER = RandomStringUtils.randomAlphanumeric(20);
 
-    private static final RedisContainer REDIS_CONTAINER = RedisContainerUtils.newRedisContainer();
-    private static final MySQLContainer<?> MY_SQL_CONTAINER = MySQLContainerUtils.newMySQLContainer();
-    private static final ClickHouseContainer CLICK_HOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
+    private final RedisContainer REDIS_CONTAINER = RedisContainerUtils.newRedisContainer();
+    private final MySQLContainer<?> MY_SQL_CONTAINER = MySQLContainerUtils.newMySQLContainer();
+    private final ClickHouseContainer CLICK_HOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
 
-    private static final WireMockUtils.WireMockRuntime WIRE_MOCK = WireMockUtils.startWireMock();
+    private final WireMockUtils.WireMockRuntime WIRE_MOCK = WireMockUtils.startWireMock();
 
-    @RegisterExtension
-    private static final TestDropwizardAppExtension APP;
+    @RegisterApp
+    private final TestDropwizardAppExtension APP;
 
-    static {
+    {
         Startables.deepStart(REDIS_CONTAINER, MY_SQL_CONTAINER, CLICK_HOUSE_CONTAINER).join();
 
         var databaseAnalyticsFactory = ClickHouseContainerUtils.newDatabaseAnalyticsFactory(
@@ -76,7 +104,7 @@ public class ChatCompletionsResourceTest {
         MigrationUtils.runDbMigration(jdbi, MySQLContainerUtils.migrationParameters());
 
         try (var connection = CLICK_HOUSE_CONTAINER.createConnection("")) {
-            MigrationUtils.runDbMigration(
+            MigrationUtils.runClickhouseDbMigration(
                     connection,
                     MigrationUtils.CLICKHOUSE_CHANGELOG_FILE,
                     ClickHouseContainerUtils.migrationParameters());
@@ -90,43 +118,48 @@ public class ChatCompletionsResourceTest {
         this.llmProviderApiKeyResourceClient = new LlmProviderApiKeyResourceClient(clientSupport);
     }
 
-    private static void mockTargetWorkspace(String workspaceName, String workspaceId) {
+    private void mockTargetWorkspace(String workspaceName, String workspaceId) {
         AuthTestUtils.mockTargetWorkspace(WIRE_MOCK.server(), API_KEY, workspaceName, workspaceId, USER);
     }
 
     @Nested
     @TestInstance(TestInstance.Lifecycle.PER_CLASS)
     class Create {
+        @ParameterizedTest
+        @MethodSource("testModelsProvider")
+        @Disabled
+        void create(
+                String expectedModel, LlmProvider llmProvider, String llmProviderApiKey,
+                BiConsumer<String, String> modelNameEvaluator) {
+            assumeThat(llmProviderApiKey).isNotEmpty();
 
-        @Test
-        void create() {
             var workspaceName = RandomStringUtils.randomAlphanumeric(20);
             var workspaceId = UUID.randomUUID().toString();
             mockTargetWorkspace(workspaceName, workspaceId);
-            createLlmProviderApiKey(workspaceName);
-            var expectedModel = ChatCompletionModel.GPT_4O_MINI.toString();
+            createLlmProviderApiKey(workspaceName, llmProvider, llmProviderApiKey);
 
             var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
                     .stream(false)
                     .model(expectedModel)
+                    .maxCompletionTokens(100)
                     .addUserMessage("Say 'Hello World'")
                     .build();
 
             var response = chatCompletionsClient.create(API_KEY, workspaceName, request);
 
-            assertThat(response.model()).containsIgnoringCase(expectedModel);
+            modelNameEvaluator.accept(response.model(), expectedModel);
             assertThat(response.choices()).anySatisfy(choice -> {
                 assertThat(choice.message().content()).containsIgnoringCase("Hello World");
                 assertThat(choice.message().role()).isEqualTo(Role.ASSISTANT);
             });
         }
 
-        @Test
-        void createReturnsBadRequestWhenNoLlmProviderApiKey() {
+        @ParameterizedTest
+        @MethodSource("testModelsProvider")
+        void createReturnsBadRequestWhenNoLlmProviderApiKey(String expectedModel, LlmProvider llmProvider) {
             var workspaceName = RandomStringUtils.randomAlphanumeric(20);
             var workspaceId = UUID.randomUUID().toString();
             mockTargetWorkspace(workspaceName, workspaceId);
-            var expectedModel = ChatCompletionModel.GPT_4O_MINI.toString();
 
             var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
                     .stream(false)
@@ -139,11 +172,12 @@ public class ChatCompletionsResourceTest {
             assertThat(errorMessage.getCode()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
             assertThat(errorMessage.getMessage())
                     .containsIgnoringCase("API key not configured for LLM provider '%s'"
-                            .formatted(LlmProvider.OPEN_AI.getValue()));
+                            .formatted(llmProvider.getValue()));
         }
 
-        @Test
-        void createReturnsBadRequestWhenNoModel() {
+        @ParameterizedTest
+        @ValueSource(strings = {"", "non-existing-model"})
+        void createReturnsBadRequestWhenModelIsInvalid(String model) {
             var workspaceName = RandomStringUtils.randomAlphanumeric(20);
             var workspaceId = UUID.randomUUID().toString();
             mockTargetWorkspace(workspaceName, workspaceId);
@@ -151,6 +185,7 @@ public class ChatCompletionsResourceTest {
 
             var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
                     .stream(false)
+                    .model(model)
                     .addUserMessage("Say 'Hello World'")
                     .build();
 
@@ -158,28 +193,32 @@ public class ChatCompletionsResourceTest {
 
             assertThat(errorMessage.getCode()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
             assertThat(errorMessage.getMessage())
-                    .containsIgnoringCase("Only %s model is available".formatted(ChatCompletionModel.GPT_4O_MINI));
+                    .containsIgnoringCase(LlmProviderFactory.ERROR_MODEL_NOT_SUPPORTED.formatted(model));
         }
 
-        @Test
-        void createAndStreamResponse() {
+        @ParameterizedTest
+        @MethodSource("testModelsProvider")
+        @Disabled
+        void createAndStreamResponse(
+                String expectedModel, LlmProvider llmProvider, String llmProviderApiKey,
+                BiConsumer<String, String> modelNameEvaluator) {
+            assumeThat(llmProviderApiKey).isNotEmpty();
+
             var workspaceName = RandomStringUtils.randomAlphanumeric(20);
             var workspaceId = UUID.randomUUID().toString();
             mockTargetWorkspace(workspaceName, workspaceId);
-            createLlmProviderApiKey(workspaceName);
-            var expectedModel = ChatCompletionModel.GPT_4O_MINI.toString();
+            createLlmProviderApiKey(workspaceName, llmProvider, llmProviderApiKey);
 
             var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
                     .stream(true)
                     .model(expectedModel)
+                    .maxCompletionTokens(100)
                     .addUserMessage("Say 'Hello World'")
                     .build();
 
             var response = chatCompletionsClient.createAndStream(API_KEY, workspaceName, request);
 
-            assertThat(response)
-                    .allSatisfy(entity -> assertThat(entity.model())
-                            .containsIgnoringCase(expectedModel));
+            response.forEach(entity -> modelNameEvaluator.accept(entity.model(), expectedModel));
 
             var choices = response.stream().flatMap(entity -> entity.choices().stream()).toList();
             assertThat(choices)
@@ -191,31 +230,108 @@ public class ChatCompletionsResourceTest {
             assertThat(choices).anySatisfy(choice -> assertThat(choice.delta().role())
                     .isEqualTo(Role.ASSISTANT));
         }
+
+        private static Stream<Arguments> testModelsProvider() {
+            BiConsumer<String, String> actualContainsExpectedEval = (actual, expected) -> assertThat(actual)
+                    .containsIgnoringCase(expected);
+            BiConsumer<String, String> expectedContainsActualEval = (actual, expected) -> assertThat(expected)
+                    .containsIgnoringCase(actual);
+
+            return Stream.of(
+                    arguments(OpenaiModelName.GPT_4O_MINI.toString(), LlmProvider.OPEN_AI,
+                            UUID.randomUUID().toString(), actualContainsExpectedEval),
+                    arguments(AnthropicModelName.CLAUDE_3_5_SONNET_20240620.toString(), LlmProvider.ANTHROPIC,
+                            System.getenv("ANTHROPIC_API_KEY"), actualContainsExpectedEval),
+                    arguments(GeminiModelName.GEMINI_1_0_PRO.toString(), LlmProvider.GEMINI,
+                            System.getenv("GEMINI_API_KEY"), actualContainsExpectedEval),
+                    arguments(OpenRouterModelName.GOOGLE_GEMINI_2_0_FLASH_LITE_PREVIEW_02_05_FREE.toString(),
+                            LlmProvider.OPEN_ROUTER, System.getenv("OPENROUTER_API_KEY"),
+                            expectedContainsActualEval));
+        }
+
+        @Test
+        void createAndStreamResponseGeminiInvalidApiKey() {
+            var workspaceName = RandomStringUtils.randomAlphanumeric(20);
+            var workspaceId = UUID.randomUUID().toString();
+            mockTargetWorkspace(workspaceName, workspaceId);
+            createLlmProviderApiKey(workspaceName, LlmProvider.GEMINI, "invalid-key");
+
+            var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
+                    .stream(true)
+                    .model(GeminiModelName.GEMINI_1_0_PRO.toString())
+                    .maxCompletionTokens(100)
+                    .addUserMessage("Say 'Hello World'")
+                    .build();
+
+            var response = chatCompletionsClient.createAndGetStreamedError(API_KEY, workspaceName, request);
+
+            assertThat(response).hasSize(1);
+            assertThat(response.getFirst().getCode()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
+            assertThat(response.getFirst().getMessage()).isEqualTo("API key not valid. Please pass a valid" +
+                    " API key.");
+            assertThat(response.getFirst().getDetails()).isEqualTo("INVALID_ARGUMENT");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"", "non-existing-model"})
+        void createAndStreamResponseReturnsBadRequestWhenNoModel(String model) {
+            var workspaceName = RandomStringUtils.randomAlphanumeric(20);
+            var workspaceId = UUID.randomUUID().toString();
+            mockTargetWorkspace(workspaceName, workspaceId);
+            createLlmProviderApiKey(workspaceName);
+
+            var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
+                    .stream(true)
+                    .model(model)
+                    .addUserMessage("Say 'Hello World'")
+                    .build();
+
+            var errorMessage = chatCompletionsClient.createAndStreamError(API_KEY, workspaceName, request,
+                    HttpStatus.SC_BAD_REQUEST);
+
+            assertThat(errorMessage.getCode()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
+            assertThat(errorMessage.getMessage())
+                    .containsIgnoringCase(ERROR_MODEL_NOT_SUPPORTED.formatted(model));
+        }
     }
 
-    @Test
-    void createAndStreamResponseReturnsBadRequestWhenNoModel() {
+    @ParameterizedTest
+    @MethodSource
+    void createAnthropicValidateMandatoryFields(ChatCompletionRequest request, String expectedErrorMessage) {
+        String llmProviderApiKey = UUID.randomUUID().toString();
+
         var workspaceName = RandomStringUtils.randomAlphanumeric(20);
         var workspaceId = UUID.randomUUID().toString();
         mockTargetWorkspace(workspaceName, workspaceId);
-        createLlmProviderApiKey(workspaceName);
+        createLlmProviderApiKey(workspaceName, LlmProvider.ANTHROPIC, llmProviderApiKey);
 
-        var request = podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
-                .stream(true)
-                .addUserMessage("Say 'Hello World'")
-                .build();
+        var errorMessage = chatCompletionsClient.create(API_KEY, workspaceName, request, HttpStatus.SC_BAD_REQUEST);
 
-        var errorMessages = chatCompletionsClient.createAndStreamError(API_KEY, workspaceName, request);
+        assertThat(errorMessage.getCode()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
+        assertThat(errorMessage.getMessage())
+                .containsIgnoringCase(expectedErrorMessage);
+    }
 
-        assertThat(errorMessages).hasSize(1);
-        assertThat(errorMessages.getFirst().getCode()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
-        assertThat(errorMessages.getFirst().getMessage())
-                .containsIgnoringCase("Only %s model is available".formatted(ChatCompletionModel.GPT_4O_MINI));
+    private Stream<Arguments> createAnthropicValidateMandatoryFields() {
+        return Stream.of(
+                arguments(named("no messages", podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
+                        .stream(false)
+                        .model(AnthropicModelName.CLAUDE_3_5_SONNET_20240620.toString())
+                        .maxCompletionTokens(100).build()),
+                        ERROR_EMPTY_MESSAGES),
+                arguments(named("no max tokens", podamFactory.manufacturePojo(ChatCompletionRequest.Builder.class)
+                        .stream(false)
+                        .model(AnthropicModelName.CLAUDE_3_5_SONNET_20240620.toString())
+                        .addUserMessage("Say 'Hello World'").build()),
+                        ERROR_NO_COMPLETION_TOKENS));
     }
 
     private void createLlmProviderApiKey(String workspaceName) {
-        var llmProviderApiKey = UUID.randomUUID().toString();
+        createLlmProviderApiKey(workspaceName, LlmProvider.OPEN_AI, UUID.randomUUID().toString());
+    }
+
+    private void createLlmProviderApiKey(String workspaceName, LlmProvider llmProvider, String llmProviderApiKey) {
         llmProviderApiKeyResourceClient.createProviderApiKey(
-                llmProviderApiKey, LlmProvider.OPEN_AI, API_KEY, workspaceName, 201);
+                llmProviderApiKey, llmProvider, API_KEY, workspaceName, 201);
     }
 }

@@ -74,10 +74,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     source,
                     trace_id,
                     span_id,
-                    input,
                     data,
-                    expected_output,
-                    metadata,
                     created_at,
                     workspace_id,
                     created_by,
@@ -91,10 +88,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                              :source<item.index>,
                              :traceId<item.index>,
                              :spanId<item.index>,
-                             :input<item.index>,
                              :data<item.index>,
-                             :expectedOutput<item.index>,
-                             :metadata<item.index>,
                              now64(9),
                              :workspace_id,
                              :createdBy<item.index>,
@@ -144,10 +138,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                 SELECT
                     id,
                     dataset_id,
-                    input,
                     <if(truncate)> mapApply((k, v) -> (k, replaceRegexpAll(v, '<truncate>', '"[image]"')), data) as data <else> data <endif>,
-                    expected_output,
-                    metadata,
                     trace_id,
                     span_id,
                     source,
@@ -189,7 +180,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     FROM dataset_items
                     WHERE dataset_id = :datasetId
                     AND workspace_id = :workspace_id
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, dataset_id, source, trace_id, span_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) AS lastRows
                 ;
@@ -218,7 +209,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     FROM dataset_items
                     WHERE dataset_id = :datasetId
                     AND workspace_id = :workspace_id
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, dataset_id, source, trace_id, span_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 )
                 ;
@@ -235,7 +226,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                                  FROM dataset_items
                                  WHERE dataset_id IN :dataset_ids
                                    AND workspace_id = :workspace_id
-                                 ORDER BY id DESC, last_updated_at DESC
+                                 ORDER BY (workspace_id, dataset_id, source, trace_id, span_id, id) DESC, last_updated_at DESC
                                  LIMIT 1 BY id
                                  ) AS lastRows
                         GROUP BY dataset_id
@@ -246,6 +237,20 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
      * Counts dataset items only if there's a matching experiment item.
      */
     private static final String SELECT_DATASET_ITEMS_WITH_EXPERIMENT_ITEMS_COUNT = """
+                <if(feedback_scores_empty_filters)>
+                WITH fsc AS (SELECT entity_id, COUNT(entity_id) AS feedback_scores_count
+                    FROM (
+                        SELECT *
+                        FROM feedback_scores
+                        WHERE entity_type = 'trace'
+                        AND workspace_id = :workspace_id
+                        ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
+                        LIMIT 1 BY entity_id, name
+                     )
+                     GROUP BY entity_id
+                     HAVING <feedback_scores_empty_filters>
+                )
+                <endif>
                 SELECT
                    COUNT(DISTINCT di.id) AS count
                 FROM (
@@ -257,7 +262,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     <if(dataset_item_filters)>
                     AND <dataset_item_filters>
                     <endif>
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, dataset_id, source, trace_id, span_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) AS di
                 INNER JOIN (
@@ -265,11 +270,14 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                         dataset_item_id,
                         trace_id
                     FROM experiment_items ei
-                    <if(experiment_item_filters || feedback_scores_filters)>
+                    <if(experiment_item_filters || feedback_scores_filters || feedback_scores_empty_filters)>
                     INNER JOIN (
                         SELECT
                             id
                         FROM traces
+                        <if(feedback_scores_empty_filters)>
+                            LEFT JOIN fsc ON fsc.entity_id = traces.id
+                        <endif>
                         WHERE workspace_id = :workspace_id
                         <if(experiment_item_filters)>
                         AND <experiment_item_filters>
@@ -283,20 +291,23 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                                 FROM feedback_scores
                                 WHERE entity_type = 'trace'
                                 AND workspace_id = :workspace_id
-                                ORDER BY entity_id DESC, last_updated_at DESC
+                                ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
                                 LIMIT 1 BY entity_id, name
                             )
                             GROUP BY entity_id
                             HAVING <feedback_scores_filters>
                         )
                         <endif>
-                        ORDER BY id DESC, last_updated_at DESC
+                        <if(feedback_scores_empty_filters)>
+                        AND fsc.feedback_scores_count = 0
+                        <endif>
+                        ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                         LIMIT 1 BY id
                     ) AS tfs ON ei.trace_id = tfs.id
                     <endif>
                     WHERE experiment_id in :experimentIds
                     AND workspace_id = :workspace_id
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, experiment_id, dataset_item_id, trace_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) AS ei ON di.id = ei.dataset_item_id
                 ;
@@ -304,11 +315,9 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
 
     private static final String SELECT_DATASET_WORKSPACE_ITEMS = """
                 SELECT
-                    id, workspace_id
+                    DISTINCT id, workspace_id
                 FROM dataset_items
                 WHERE id IN :datasetItemIds
-                ORDER BY id DESC, last_updated_at DESC
-                LIMIT 1 BY id
                 ;
             """;
 
@@ -357,7 +366,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                 FROM experiment_items
                 WHERE workspace_id = :workspace_id
                 AND experiment_id IN :experimentIds
-                ORDER BY id DESC, last_updated_at DESC
+                ORDER BY (workspace_id, experiment_id, dataset_item_id, trace_id, id) DESC, last_updated_at DESC
             	LIMIT 1 BY id
             ), feedback_scores_final AS (
             	SELECT
@@ -366,23 +375,52 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     category_name,
                     value,
                     reason,
-                    source
+                    source,
+                    created_at,
+                    last_updated_at,
+                    created_by,
+                    last_updated_by
                 FROM feedback_scores
                 WHERE workspace_id = :workspace_id
                 AND entity_type = :entityType
                 AND entity_id IN (SELECT trace_id FROM experiment_items_scope)
-                ORDER BY entity_id DESC, last_updated_at DESC
+                ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
                 LIMIT 1 BY entity_id, name
-            ),  experiment_items_final AS (
+            ), comments_final AS (
+                SELECT
+                    id AS comment_id,
+                    text,
+                    created_at AS comment_created_at,
+                    last_updated_at AS comment_last_updated_at,
+                    created_by AS comment_created_by,
+                    last_updated_by AS comment_last_updated_by,
+                    entity_id
+                FROM comments
+                WHERE workspace_id = :workspace_id
+                AND entity_id IN (SELECT trace_id FROM experiment_items_scope)
+                ORDER BY (workspace_id, project_id, entity_id, id) DESC, last_updated_at DESC
+                LIMIT 1 BY id
+            ),
+            <if(feedback_scores_empty_filters)>
+            fsc AS (SELECT entity_id, COUNT(entity_id) AS feedback_scores_count
+                 FROM feedback_scores_final
+                 GROUP BY entity_id
+                 HAVING <feedback_scores_empty_filters>
+            ),
+            <endif>
+            experiment_items_final AS (
             	SELECT
             		ei.*
             	FROM experiment_items_scope ei
             	WHERE workspace_id = :workspace_id
-            	<if(experiment_item_filters || feedback_scores_filters)>
+            	<if(experiment_item_filters || feedback_scores_filters || feedback_scores_empty_filters)>
                 AND trace_id IN (
                     SELECT
                         id
                     FROM traces
+                    <if(feedback_scores_empty_filters)>
+                        LEFT JOIN fsc ON fsc.entity_id = traces.id
+                    <endif>
                     WHERE workspace_id = :workspace_id
                     <if(experiment_item_filters)>
                     AND <experiment_item_filters>
@@ -396,20 +434,19 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                         HAVING <feedback_scores_filters>
                     )
                     <endif>
-                    ORDER BY id DESC, last_updated_at DESC
+                    <if(feedback_scores_empty_filters)>
+                    AND fsc.feedback_scores_count = 0
+                    <endif>
+                    ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 )
                 <endif>
             	ORDER BY id DESC, last_updated_at DESC
-            	LIMIT 1 BY id
             )
             SELECT
                 di.id AS id,
                 di.dataset_id AS dataset_id,
-                di.input AS input,
                 <if(truncate)> mapApply((k, v) -> (k, replaceRegexpAll(v, '<truncate>', '"[image]"')), di.data) as data <else> di.data <endif>,
-                di.expected_output AS expected_output,
-                di.metadata AS metadata,
                 di.trace_id AS trace_id,
                 di.span_id AS span_id,
                 di.source AS source,
@@ -428,7 +465,8 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     ei.created_at,
                     ei.last_updated_at,
                     ei.created_by,
-                    ei.last_updated_by
+                    ei.last_updated_by,
+                    tfs.comments_array_agg
                 )) AS experiment_items_array
             FROM dataset_items_final AS di
             INNER JOIN experiment_items_final AS ei ON di.id = ei.dataset_item_id
@@ -437,7 +475,8 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     t.id,
                     t.input,
                     t.output,
-                    groupArray(tuple(fs.*)) AS feedback_scores_array
+                    groupUniqArray(tuple(fs.*)) AS feedback_scores_array,
+                    groupUniqArray(tuple(c.*)) AS comments_array_agg
                 FROM (
                     SELECT
                         id,
@@ -446,10 +485,11 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     FROM traces
                     WHERE workspace_id = :workspace_id
                     AND id IN (SELECT trace_id FROM experiment_items_final)
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) AS t
                 LEFT JOIN feedback_scores_final AS fs ON t.id = fs.entity_id
+                LEFT JOIN comments_final AS c ON t.id = c.entity_id
                 GROUP BY
                     t.id,
                     t.input,
@@ -458,10 +498,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
             GROUP BY
                 di.id,
                 di.dataset_id,
-                di.input,
                 di.data,
-                di.expected_output,
-                di.metadata,
                 di.trace_id,
                 di.span_id,
                 di.source,
@@ -504,7 +541,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     FROM dataset_items
                     WHERE workspace_id = :workspace_id
                     AND dataset_id = :dataset_id
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, dataset_id, source, trace_id, span_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) as di
                 INNER JOIN (
@@ -517,7 +554,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     <if(experiment_ids)>
                     AND experiment_id in :experiment_ids
                     <endif>
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, experiment_id, dataset_item_id, trace_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) as ei ON ei.dataset_item_id = di.id
                 INNER JOIN (
@@ -526,7 +563,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                         output
                     FROM traces
                     WHERE workspace_id = :workspace_id
-                    ORDER BY id DESC, last_updated_at DESC
+                    ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
                     LIMIT 1 BY id
                 ) as t ON t.id = ei.trace_id
                 ;
@@ -567,28 +604,12 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
             for (DatasetItem item : items) {
                 Map<String, JsonNode> data = new HashMap<>(Optional.ofNullable(item.data()).orElse(Map.of()));
 
-                if (!data.containsKey("input") && item.input() != null) {
-                    data.put("input", item.input());
-                }
-
-                if (!data.containsKey("expected_output") && item.expectedOutput() != null) {
-                    data.put("expected_output", item.expectedOutput());
-                }
-
-                if (!data.containsKey("metadata") && item.metadata() != null) {
-                    data.put("metadata", item.metadata());
-                }
-
                 statement.bind("id" + i, item.id());
                 statement.bind("datasetId" + i, datasetId);
                 statement.bind("source" + i, item.source().getValue());
                 statement.bind("traceId" + i, DatasetItemResultMapper.getOrDefault(item.traceId()));
                 statement.bind("spanId" + i, DatasetItemResultMapper.getOrDefault(item.spanId()));
-                statement.bind("input" + i, DatasetItemResultMapper.getOrDefault(item.input()));
                 statement.bind("data" + i, DatasetItemResultMapper.getOrDefault(data));
-                statement.bind("expectedOutput" + i,
-                        DatasetItemResultMapper.getOrDefault(item.expectedOutput()));
-                statement.bind("metadata" + i, DatasetItemResultMapper.getOrDefault(item.metadata()));
                 statement.bind("createdBy" + i, userName);
                 statement.bind("lastUpdatedBy" + i, userName);
                 i++;
@@ -796,6 +817,10 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
 
                     filterQueryBuilder.toAnalyticsDbFilters(filters, FilterStrategy.FEEDBACK_SCORES)
                             .ifPresent(scoresFilters -> template.add("feedback_scores_filters", scoresFilters));
+
+                    filterQueryBuilder.toAnalyticsDbFilters(filters, FilterStrategy.FEEDBACK_SCORES_IS_EMPTY)
+                            .ifPresent(feedbackScoreIsEmptyFilters -> template.add("feedback_scores_empty_filters",
+                                    feedbackScoreIsEmptyFilters));
                 });
 
         return template;
@@ -807,6 +832,7 @@ class DatasetItemDAOImpl implements DatasetItemDAO {
                     filterQueryBuilder.bind(statement, filters, FilterStrategy.DATASET_ITEM);
                     filterQueryBuilder.bind(statement, filters, FilterStrategy.EXPERIMENT_ITEM);
                     filterQueryBuilder.bind(statement, filters, FilterStrategy.FEEDBACK_SCORES);
+                    filterQueryBuilder.bind(statement, filters, FilterStrategy.FEEDBACK_SCORES_IS_EMPTY);
                 });
     }
 

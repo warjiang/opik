@@ -2,14 +2,26 @@ package com.comet.opik.podam;
 
 import com.comet.opik.api.DatasetItem;
 import com.comet.opik.api.PromptVersion;
+import com.comet.opik.api.ProviderApiKey;
+import com.comet.opik.api.ProviderApiKeyUpdate;
 import com.comet.opik.podam.manufacturer.BigDecimalTypeManufacturer;
 import com.comet.opik.podam.manufacturer.CategoricalFeedbackDetailTypeManufacturer;
 import com.comet.opik.podam.manufacturer.DatasetItemTypeManufacturer;
 import com.comet.opik.podam.manufacturer.JsonNodeTypeManufacturer;
 import com.comet.opik.podam.manufacturer.NumericalFeedbackDetailTypeManufacturer;
 import com.comet.opik.podam.manufacturer.PromptVersionManufacturer;
+import com.comet.opik.podam.manufacturer.ProviderApiKeyManufacturer;
+import com.comet.opik.podam.manufacturer.ProviderApiKeyUpdateManufacturer;
 import com.comet.opik.podam.manufacturer.UUIDTypeManufacturer;
+import com.comet.opik.podam.manufacturer.anthropic.AnthropicContentManufacturer;
+import com.comet.opik.podam.manufacturer.anthropic.AnthropicCreateMessageResponseManufacturer;
+import com.comet.opik.podam.manufacturer.anthropic.AnthropicUsageManufacturer;
+import com.comet.opik.podam.manufacturer.anthropic.ChatCompletionRequestManufacturer;
 import com.fasterxml.jackson.databind.JsonNode;
+import dev.ai4j.openai4j.chat.ChatCompletionRequest;
+import dev.langchain4j.model.anthropic.internal.api.AnthropicContent;
+import dev.langchain4j.model.anthropic.internal.api.AnthropicCreateMessageResponse;
+import dev.langchain4j.model.anthropic.internal.api.AnthropicUsage;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Pattern;
@@ -44,6 +56,14 @@ public class PodamFactoryUtils {
         strategy.addOrReplaceTypeManufacturer(JsonNode.class, JsonNodeTypeManufacturer.INSTANCE);
         strategy.addOrReplaceTypeManufacturer(DatasetItem.class, DatasetItemTypeManufacturer.INSTANCE);
         strategy.addOrReplaceTypeManufacturer(PromptVersion.class, PromptVersionManufacturer.INSTANCE);
+        strategy.addOrReplaceTypeManufacturer(ProviderApiKey.class, ProviderApiKeyManufacturer.INSTANCE);
+        strategy.addOrReplaceTypeManufacturer(ProviderApiKeyUpdate.class, ProviderApiKeyUpdateManufacturer.INSTANCE);
+        strategy.addOrReplaceTypeManufacturer(AnthropicContent.class, AnthropicContentManufacturer.INSTANCE);
+        strategy.addOrReplaceTypeManufacturer(AnthropicUsage.class, AnthropicUsageManufacturer.INSTANCE);
+        strategy.addOrReplaceTypeManufacturer(AnthropicCreateMessageResponse.class,
+                AnthropicCreateMessageResponseManufacturer.INSTANCE);
+        strategy.addOrReplaceTypeManufacturer(ChatCompletionRequest.class, ChatCompletionRequestManufacturer.INSTANCE);
+
         return podamFactory;
     }
 

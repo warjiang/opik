@@ -111,7 +111,10 @@ class ChatCompletionsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.chat_completions.create_chat_completions()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -119,7 +122,11 @@ class ChatCompletionsClient:
             method="POST",
             json={
                 "model": model,
-                "messages": messages,
+                "messages": convert_and_respect_annotation_metadata(
+                    object_=messages,
+                    annotation=typing.Sequence[Message],
+                    direction="write",
+                ),
                 "temperature": temperature,
                 "top_p": top_p,
                 "n": n,
@@ -268,7 +275,10 @@ class AsyncChatCompletionsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -282,7 +292,11 @@ class AsyncChatCompletionsClient:
             method="POST",
             json={
                 "model": model,
-                "messages": messages,
+                "messages": convert_and_respect_annotation_metadata(
+                    object_=messages,
+                    annotation=typing.Sequence[Message],
+                    direction="write",
+                ),
                 "temperature": temperature,
                 "top_p": top_p,
                 "n": n,

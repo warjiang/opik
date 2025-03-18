@@ -1,5 +1,14 @@
-from typing import Optional, Dict, Any
+import logging
+from typing import Any, Dict, Optional
+
+from llama_index.core import Settings
+from llama_index.core.base.llms.types import ChatResponse
 from llama_index.core.callbacks import schema as llama_index_schema
+
+from opik import llm_usage
+from opik.types import LLMProvider
+
+LOGGER = logging.getLogger(__name__)
 
 
 def get_span_input_from_events(
@@ -109,3 +118,39 @@ def get_span_output_from_event(
         return {"output": payload_copy}
     else:
         return None
+
+
+def get_usage_data(
+    payload: Optional[Dict[str, Any]],
+) -> llm_usage.LLMUsageInfo:
+    llm_usage_info = llm_usage.LLMUsageInfo()
+
+    if payload is None or len(payload) == 0:
+        return llm_usage_info
+
+    # The comment for LLAMAIndex version 0.12.8:
+    # Here we manually parse token usage info for OpenAI only (and we could do so for other providers),
+    # although we could try to use TokenCountingHandler.
+    # However, TokenCountingHandler currently also supports only OpenAI models.
+
+    if "openai" not in Settings.llm.class_name().lower():
+        return llm_usage_info
+
+    response: Optional[ChatResponse] = payload.get(
+        llama_index_schema.EventPayload.RESPONSE
+    )
+
+    if response and hasattr(response, "raw"):
+        if hasattr(response.raw, "model"):
+            llm_usage_info.model = response.raw.model
+            llm_usage_info.provider = LLMProvider.OPENAI
+        if hasattr(response.raw, "usage"):
+            usage_info = response.raw.usage.model_dump()
+            llm_usage_info.usage = llm_usage.try_build_opik_usage_or_log_error(
+                provider=LLMProvider.OPENAI,  # TODO: check if other options are possible, this is just old behavior
+                usage=usage_info,
+                logger=LOGGER,
+                error_message="Failed to log token usage from llama_index run",
+            )
+
+    return llm_usage_info

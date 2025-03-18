@@ -17,6 +17,10 @@ on:
           - anthropic
           - aisuite
           - haystack
+          - guardrails
+          - dspy
+          - crewai
+          - genai
   schedule:
     - cron: "0 0 */1 * *"
   pull_request:
@@ -31,6 +35,7 @@ on:
 env:
   SLACK_WEBHOOK_URL: ${{ secrets.ACTION_MONITORING_SLACK }}
   LIBS: ${{ github.event.inputs.libs != '' && github.event.inputs.libs  || 'all' }}
+  OPIK_SENTRY_ENABLE: False
 
 jobs:
   init_environment:
@@ -80,3 +85,28 @@ jobs:
     if: contains(fromJSON('["haystack", "all"]'), needs.init_environment.outputs.LIBS)
     uses: ./.github/workflows/lib-haystack-tests.yml
     secrets: inherit
+
+  guardrails_tests:
+    needs: [init_environment]
+    if: contains(fromJSON('["guardrails", "all"]'), needs.init_environment.outputs.LIBS)
+    uses: ./.github/workflows/lib-guardrails-tests.yml
+    secrets: inherit
+
+  dspy_tests:
+    needs: [init_environment]
+    if: contains(fromJSON('["dspy", "all"]'), needs.init_environment.outputs.LIBS)
+    uses: ./.github/workflows/lib-dspy-tests.yml
+    secrets: inherit
+
+  crewai_tests:
+    needs: [init_environment]
+    if: contains(fromJSON('["crewai", "all"]'), needs.init_environment.outputs.LIBS)
+    uses: ./.github/workflows/lib-crewai-tests.yml
+    secrets: inherit
+  
+  genai_tests:
+    needs: [init_environment]
+    if: contains(fromJSON('["genai", "all"]'), needs.init_environment.outputs.LIBS)
+    uses: ./.github/workflows/lib-genai-tests.yml
+    secrets: inherit
+

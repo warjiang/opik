@@ -4,14 +4,12 @@ import com.comet.opik.api.FeedbackScore;
 import com.comet.opik.api.FeedbackScoreBatchItem;
 import com.comet.opik.api.FeedbackScoreNames;
 import com.comet.opik.api.Project;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.infrastructure.auth.RequestContext;
+import com.comet.opik.utils.BinaryOperatorUtils;
 import com.comet.opik.utils.WorkspaceUtils;
 import com.google.inject.ImplementedBy;
 import com.google.inject.Singleton;
 import jakarta.inject.Inject;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.core.Response;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,14 +23,16 @@ import java.sql.SQLIntegrityConstraintViolationException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static com.comet.opik.domain.FeedbackScoreDAO.EntityType;
 import static com.comet.opik.infrastructure.db.TransactionTemplateAsync.READ_ONLY;
 import static com.comet.opik.infrastructure.db.TransactionTemplateAsync.WRITE;
+import static com.comet.opik.utils.ErrorUtils.failWithNotFound;
 import static java.util.stream.Collectors.groupingBy;
-import static java.util.stream.Collectors.toMap;
 
 @ImplementedBy(FeedbackScoreServiceImpl.class)
 public interface FeedbackScoreService {
@@ -50,7 +50,9 @@ public interface FeedbackScoreService {
 
     Mono<FeedbackScoreNames> getSpanFeedbackScoreNames(UUID projectId, SpanType type);
 
-    Mono<FeedbackScoreNames> getExperimentsFeedbackScoreNames(List<UUID> experimentIds);
+    Mono<FeedbackScoreNames> getExperimentsFeedbackScoreNames(Set<UUID> experimentIds);
+
+    Mono<FeedbackScoreNames> getProjectsFeedbackScoreNames(Set<UUID> projectIds);
 }
 
 @Slf4j
@@ -69,33 +71,19 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
 
     @Override
     public Mono<Void> scoreTrace(@NonNull UUID traceId, @NonNull FeedbackScore score) {
-        return traceDAO.getProjectIdFromTraces(Set.of(traceId))
-                .flatMap(traceProjectIdMap -> {
-
-                    if (traceProjectIdMap.get(traceId) == null) {
-                        return Mono.error(failWithTraceNotFound(traceId));
-                    }
-
-                    return dao.scoreEntity(EntityType.TRACE, traceId, score, traceProjectIdMap)
-                            .flatMap(this::extractResult)
-                            .then();
-                });
+        return traceDAO.getProjectIdFromTrace(traceId)
+                .switchIfEmpty(Mono.error(failWithNotFound("Trace", traceId)))
+                .flatMap(projectId -> dao.scoreEntity(EntityType.TRACE, traceId, score, projectId))
+                .then();
     }
 
     @Override
     public Mono<Void> scoreSpan(@NonNull UUID spanId, @NonNull FeedbackScore score) {
 
-        return spanDAO.getProjectIdFromSpans(Set.of(spanId))
-                .flatMap(spanProjectIdMap -> {
-
-                    if (spanProjectIdMap.get(spanId) == null) {
-                        return Mono.error(failWithSpanNotFound(spanId));
-                    }
-
-                    return dao.scoreEntity(EntityType.SPAN, spanId, score, spanProjectIdMap)
-                            .flatMap(this::extractResult)
-                            .then();
-                });
+        return spanDAO.getProjectIdFromSpan(spanId)
+                .switchIfEmpty(Mono.error(failWithNotFound("Span", spanId)))
+                .flatMap(projectId -> dao.scoreEntity(EntityType.SPAN, spanId, score, projectId))
+                .then();
     }
 
     @Override
@@ -158,24 +146,31 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
                 .flatMap(projectDto -> dao.scoreBatchOf(entityType, projectDto.scores()))
                 .reduce(0L, Long::sum)
                 .flatMap(rowsUpdated -> rowsUpdated == actualBatchSize ? Mono.just(rowsUpdated) : Mono.empty())
-                .switchIfEmpty(Mono.defer(() -> failWithNotFound("Error while processing scores batch")));
+                .switchIfEmpty(Mono.error(failWithNotFound("Error while processing scores batch")));
     }
 
     private List<ProjectDto> mergeProjectsAndScores(Map<String, Project> projectMap,
             Map<String, List<FeedbackScoreBatchItem>> scoresPerProject) {
         return scoresPerProject.keySet()
                 .stream()
-                .map(projectName -> new ProjectDto(
-                        projectMap.get(projectName),
-                        scoresPerProject.get(projectName)
-                                .stream()
-                                .map(item -> item.toBuilder().projectId(projectMap.get(projectName).id()).build()) // set projectId
-                                .toList()))
+                .map(projectName -> {
+                    Project project = projectMap.get(projectName);
+                    return new ProjectDto(
+                            project,
+                            scoresPerProject.get(projectName)
+                                    .stream()
+                                    .map(item -> item.toBuilder().projectId(project.id()).build()) // set projectId
+                                    .toList());
+                })
                 .toList();
     }
 
     private Map<String, Project> groupByName(List<Project> projects) {
-        return projects.stream().collect(toMap(Project::name, Function.identity()));
+        return projects.stream().collect(Collectors.toMap(
+                Project::name,
+                Function.identity(),
+                BinaryOperatorUtils.last(),
+                () -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER)));
     }
 
     private List<Project> getAllProjectsByName(String workspaceId,
@@ -191,7 +186,8 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
     private void checkIfNeededToCreateProjects(Map<String, List<FeedbackScoreBatchItem>> scoresPerProject,
             String userName, String workspaceId) {
 
-        Map<String, Project> projectsPerName = groupByName(getAllProjectsByName(workspaceId, scoresPerProject));
+        Map<String, Project> projectsPerLowerCaseName = groupByName(
+                getAllProjectsByName(workspaceId, scoresPerProject));
 
         syncTemplate.inTransaction(WRITE, handle -> {
 
@@ -200,7 +196,7 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
             scoresPerProject
                     .keySet()
                     .stream()
-                    .filter(projectName -> !projectsPerName.containsKey(projectName))
+                    .filter(projectName -> !projectsPerLowerCaseName.containsKey(projectName))
                     .forEach(projectName -> {
                         UUID projectId = idGenerator.generateId();
                         var newProject = Project.builder()
@@ -250,33 +246,16 @@ class FeedbackScoreServiceImpl implements FeedbackScoreService {
     }
 
     @Override
-    public Mono<FeedbackScoreNames> getExperimentsFeedbackScoreNames(List<UUID> experimentIds) {
+    public Mono<FeedbackScoreNames> getExperimentsFeedbackScoreNames(Set<UUID> experimentIds) {
         return dao.getExperimentsFeedbackScoreNames(experimentIds)
                 .map(names -> names.stream().map(FeedbackScoreNames.ScoreName::new).toList())
                 .map(FeedbackScoreNames::new);
     }
 
-    private Mono<Long> failWithNotFound(String errorMessage) {
-        log.info(errorMessage);
-        return Mono.error(new NotFoundException(Response.status(404)
-                .entity(new ErrorMessage(List.of(errorMessage))).build()));
+    @Override
+    public Mono<FeedbackScoreNames> getProjectsFeedbackScoreNames(Set<UUID> projectIds) {
+        return dao.getProjectsFeedbackScoreNames(projectIds)
+                .map(names -> names.stream().map(FeedbackScoreNames.ScoreName::new).toList())
+                .map(FeedbackScoreNames::new);
     }
-
-    private Mono<Long> extractResult(Long rowsUpdated) {
-        return rowsUpdated.equals(0L) ? Mono.empty() : Mono.just(rowsUpdated);
-    }
-
-    private Throwable failWithTraceNotFound(UUID id) {
-        String message = "Trace id: %s not found".formatted(id);
-        log.info(message);
-        return new NotFoundException(Response.status(404)
-                .entity(new ErrorMessage(List.of(message))).build());
-    }
-
-    private NotFoundException failWithSpanNotFound(UUID id) {
-        String message = "Not found span with id '%s'".formatted(id);
-        log.info(message);
-        return new NotFoundException(message);
-    }
-
 }

@@ -1,23 +1,16 @@
 import logging
-from typing import List, Any, Dict, Optional, Callable, Tuple, Union, TypedDict, cast
-from opik import dict_utils
-from opik.decorator import base_track_decorator, arguments_helpers
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
 
-from . import stream_wrappers
+from opik import dict_utils, llm_usage
+from opik.api_objects import span
+from opik.decorator import arguments_helpers, base_track_decorator
 
-from botocore import eventstream
+from . import helpers, stream_wrappers
 
 LOGGER = logging.getLogger(__name__)
 
 KWARGS_KEYS_TO_LOG_AS_INPUTS = ["messages", "system", "toolConfig", "guardrailConfig"]
 RESPONSE_KEYS_TO_LOG_AS_OUTPUTS = ["output"]
-
-BedrockResponseWithStream = Dict[str, Any]
-
-
-class ConverseStreamOutput(TypedDict):
-    stream: eventstream.EventStream
-    ResponseMetadata: Dict[str, Any]
 
 
 class BedrockConverseDecorator(base_track_decorator.BaseTrackDecorator):
@@ -59,14 +52,18 @@ class BedrockConverseDecorator(base_track_decorator.BaseTrackDecorator):
         return result
 
     def _end_span_inputs_preprocessor(
-        self, output: Any, capture_output: bool
+        self,
+        output: Any,
+        capture_output: bool,
+        current_span_data: span.SpanData,
     ) -> arguments_helpers.EndSpanParameters:
         usage = output["usage"]
-        usage_in_openai_format = {
-            "prompt_tokens": usage["inputTokens"],
-            "completion_tokens": usage["outputTokens"],
-            "total_tokens": usage["inputTokens"] + usage["outputTokens"],
-        }
+        usage_in_openai_format = llm_usage.try_build_opik_usage_or_log_error(
+            provider="_bedrock",
+            usage=usage,
+            logger=LOGGER,
+            error_message="Failed to log token usage from bedrock LLM call",
+        )
 
         output, metadata = dict_utils.split_dict_by_keys(
             output, RESPONSE_KEYS_TO_LOG_AS_OUTPUTS
@@ -79,13 +76,13 @@ class BedrockConverseDecorator(base_track_decorator.BaseTrackDecorator):
 
         return result
 
-    def _generators_handler(  # type: ignore
+    def _streams_handler(  # type: ignore
         self,
         output: Any,
         capture_output: bool,
         generations_aggregator: Optional[Callable[[List[Any]], Any]],
     ) -> Union[
-        ConverseStreamOutput,
+        helpers.ConverseStreamOutput,
         None,
     ]:
         DECORATED_FUNCTION_IS_NOT_EXPECTED_TO_RETURN_GENERATOR = (
@@ -111,7 +108,7 @@ class BedrockConverseDecorator(base_track_decorator.BaseTrackDecorator):
             )
 
             output["stream"] = wrapped_stream
-            return cast(ConverseStreamOutput, output)
+            return cast(helpers.ConverseStreamOutput, output)
 
         STREAM_NOT_FOUND = None
 

@@ -6,6 +6,7 @@ import datetime as dt
 from .json_node_public import JsonNodePublic
 from .error_info_public import ErrorInfoPublic
 from .feedback_score_public import FeedbackScorePublic
+from .comment_public import CommentPublic
 import pydantic
 from ..core.pydantic_utilities import IS_PYDANTIC_V2
 
@@ -27,11 +28,14 @@ class TracePublic(UniversalBaseModel):
     created_by: typing.Optional[str] = None
     last_updated_by: typing.Optional[str] = None
     feedback_scores: typing.Optional[typing.List[FeedbackScorePublic]] = None
+    comments: typing.Optional[typing.List[CommentPublic]] = None
     total_estimated_cost: typing.Optional[float] = None
     duration: typing.Optional[float] = pydantic.Field(default=None)
     """
     Duration in milliseconds as a decimal number to support sub-millisecond precision
     """
+
+    thread_id: typing.Optional[str] = None
 
     if IS_PYDANTIC_V2:
         model_config: typing.ClassVar[pydantic.ConfigDict] = pydantic.ConfigDict(

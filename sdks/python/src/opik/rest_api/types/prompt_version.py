@@ -3,6 +3,8 @@
 from ..core.pydantic_utilities import UniversalBaseModel
 import typing
 import pydantic
+from .json_node import JsonNode
+from .prompt_version_type import PromptVersionType
 import datetime as dt
 from ..core.pydantic_utilities import IS_PYDANTIC_V2
 
@@ -20,6 +22,9 @@ class PromptVersion(UniversalBaseModel):
     """
 
     template: str
+    metadata: typing.Optional[JsonNode] = None
+    type: typing.Optional[PromptVersionType] = None
+    change_description: typing.Optional[str] = None
     variables: typing.Optional[typing.List[str]] = None
     created_at: typing.Optional[dt.datetime] = None
     created_by: typing.Optional[str] = None

@@ -2,7 +2,6 @@ export interface User {
   apiKeys: string[];
   defaultWorkspace: string;
   email: string;
-  getTeams: GetTeams;
   gitHub: boolean;
   loggedIn: boolean;
   orgReachedTraceLimit?: boolean;
@@ -51,4 +50,15 @@ export interface UserPermission {
     | "invite_users_to_workspace"
     | "project_visibility";
   permissionValue: "true" | "false";
+}
+
+export interface Workspace {
+  createdAt: number;
+  workspaceId: string;
+  workspaceName: string;
+  workspaceOwner: string;
+  workspaceCreator: string;
+  organizationId: string;
+  collaborationFeaturesDisabled: boolean;
+  default: boolean;
 }

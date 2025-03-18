@@ -15,6 +15,7 @@ import static com.comet.opik.infrastructure.auth.RequestContext.*;
 public interface AuthService {
 
     void authenticate(HttpHeaders headers, Cookie sessionToken, String path);
+    void authenticateSession(Cookie sessionToken);
 }
 
 @RequiredArgsConstructor
@@ -28,13 +29,18 @@ class AuthServiceImpl implements AuthService {
         var currentWorkspaceName = WorkspaceUtils.getWorkspaceName(headers.getHeaderString(WORKSPACE_HEADER));
 
         if (ProjectService.DEFAULT_WORKSPACE_NAME.equals(currentWorkspaceName)) {
-            requestContext.get().setWorkspaceName(currentWorkspaceName);
             requestContext.get().setUserName(ProjectService.DEFAULT_USER);
             requestContext.get().setWorkspaceId(ProjectService.DEFAULT_WORKSPACE_ID);
+            requestContext.get().setWorkspaceName(ProjectService.DEFAULT_WORKSPACE_NAME);
             requestContext.get().setApiKey("default");
             return;
         }
 
         throw new ClientErrorException("Workspace not found", Response.Status.NOT_FOUND);
+    }
+
+    @Override
+    public void authenticateSession(Cookie sessionToken) {
+        // no authentication for local installations
     }
 }

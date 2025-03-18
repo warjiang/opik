@@ -108,6 +108,7 @@ class BackendEmulatorMessageProcessor(message_processors.BaseMessageProcessor):
                 end_time=message.end_time,
                 project_name=message.project_name,
                 error_info=message.error_info,
+                thread_id=message.thread_id,
             )
 
             self._trace_trees.append(trace)
@@ -129,6 +130,7 @@ class BackendEmulatorMessageProcessor(message_processors.BaseMessageProcessor):
                 model=message.model,
                 provider=message.provider,
                 error_info=message.error_info,
+                total_cost=message.total_cost,
             )
 
             self._span_to_parent_span[span.id] = message.parent_span_id
@@ -156,6 +158,7 @@ class BackendEmulatorMessageProcessor(message_processors.BaseMessageProcessor):
                 "error_info": message.error_info,
                 "tags": message.tags,
                 "input": message.input,
+                "total_cost": message.total_cost,
             }
             cleaned_update_payload = dict_utils.remove_none_from_dict(update_payload)
             span.__dict__.update(cleaned_update_payload)
@@ -169,6 +172,7 @@ class BackendEmulatorMessageProcessor(message_processors.BaseMessageProcessor):
                 "error_info": message.error_info,
                 "tags": message.tags,
                 "input": message.input,
+                "thread_id": message.thread_id,
             }
             cleaned_update_payload = dict_utils.remove_none_from_dict(update_payload)
             current_trace.__dict__.update(cleaned_update_payload)

@@ -2,6 +2,7 @@ package com.comet.opik.api.resources.v1.priv;
 
 import com.comet.opik.api.Page;
 import com.comet.opik.api.ProviderApiKey;
+import com.comet.opik.api.ProviderApiKeyUpdate;
 import com.comet.opik.api.resources.utils.AuthTestUtils;
 import com.comet.opik.api.resources.utils.ClickHouseContainerUtils;
 import com.comet.opik.api.resources.utils.ClientSupportUtils;
@@ -12,17 +13,24 @@ import com.comet.opik.api.resources.utils.TestDropwizardAppExtensionUtils;
 import com.comet.opik.api.resources.utils.WireMockUtils;
 import com.comet.opik.api.resources.utils.resources.LlmProviderApiKeyResourceClient;
 import com.comet.opik.domain.LlmProviderApiKeyDAO;
+import com.comet.opik.extensions.DropwizardAppExtensionProvider;
+import com.comet.opik.extensions.RegisterApp;
 import com.comet.opik.infrastructure.DatabaseAnalyticsFactory;
-import com.comet.opik.infrastructure.EncryptionUtils;
 import com.comet.opik.podam.PodamFactoryUtils;
+import com.comet.opik.utils.JsonUtils;
 import com.redis.testcontainers.RedisContainer;
+import io.dropwizard.jersey.errors.ErrorMessage;
+import org.apache.commons.lang3.StringUtils;
 import org.jdbi.v3.core.Jdbi;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.lifecycle.Startables;
@@ -35,31 +43,33 @@ import java.sql.SQLException;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static com.comet.opik.api.resources.utils.ClickHouseContainerUtils.DATABASE_NAME;
 import static com.comet.opik.api.resources.utils.MigrationUtils.CLICKHOUSE_CHANGELOG_FILE;
+import static com.comet.opik.infrastructure.EncryptionUtils.decrypt;
+import static com.comet.opik.infrastructure.EncryptionUtils.maskApiKey;
 import static com.comet.opik.infrastructure.db.TransactionTemplateAsync.READ_ONLY;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Proxy Resource Test")
+@ExtendWith(DropwizardAppExtensionProvider.class)
 class LlmProviderApiKeyResourceTest {
-    public static final String URL_TEMPLATE = "%s/v1/private/llm-provider-key";
-
+    private static final String USER = UUID.randomUUID().toString();
     public static final String[] IGNORED_FIELDS = {"createdBy", "lastUpdatedBy", "createdAt", "lastUpdatedAt"};
 
-    private static final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
-    private static final ClickHouseContainer CLICKHOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
-    private static final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
+    private final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
+    private final ClickHouseContainer CLICKHOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
+    private final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
 
-    private static final String USER = UUID.randomUUID().toString();
+    @RegisterApp
+    private final TestDropwizardAppExtension APP;
 
-    @RegisterExtension
-    private static final TestDropwizardAppExtension app;
+    private final WireMockUtils.WireMockRuntime wireMock;
 
-    private static final WireMockUtils.WireMockRuntime wireMock;
-
-    static {
+    {
         Startables.deepStart(REDIS, CLICKHOUSE_CONTAINER, MYSQL).join();
 
         wireMock = WireMockUtils.startWireMock();
@@ -67,7 +77,7 @@ class LlmProviderApiKeyResourceTest {
         DatabaseAnalyticsFactory databaseAnalyticsFactory = ClickHouseContainerUtils
                 .newDatabaseAnalyticsFactory(CLICKHOUSE_CONTAINER, DATABASE_NAME);
 
-        app = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
+        APP = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
                 MYSQL.getJdbcUrl(), databaseAnalyticsFactory, wireMock.runtimeInfo(), REDIS.getRedisURI());
     }
 
@@ -83,7 +93,7 @@ class LlmProviderApiKeyResourceTest {
         MigrationUtils.runDbMigration(jdbi, MySQLContainerUtils.migrationParameters());
 
         try (var connection = CLICKHOUSE_CONTAINER.createConnection("")) {
-            MigrationUtils.runDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
+            MigrationUtils.runClickhouseDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
                     ClickHouseContainerUtils.migrationParameters());
         }
 
@@ -93,7 +103,7 @@ class LlmProviderApiKeyResourceTest {
         ClientSupportUtils.config(client);
     }
 
-    private static void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
+    private void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
         AuthTestUtils.mockTargetWorkspace(wireMock.server(), apiKey, workspaceName, workspaceId, USER);
     }
 
@@ -109,19 +119,84 @@ class LlmProviderApiKeyResourceTest {
         String workspaceName = UUID.randomUUID().toString();
         String apiKey = UUID.randomUUID().toString();
         String workspaceId = UUID.randomUUID().toString();
-        String providerApiKey = factory.manufacturePojo(String.class);
+        ProviderApiKey providerApiKey = factory.manufacturePojo(ProviderApiKey.class);
 
         mockTargetWorkspace(apiKey, workspaceName, workspaceId);
 
         var expectedProviderApiKey = llmProviderApiKeyResourceClient.createProviderApiKey(providerApiKey, apiKey,
                 workspaceName, 201);
         getAndAssertProviderApiKey(expectedProviderApiKey, apiKey, workspaceName);
-        checkEncryption(expectedProviderApiKey.id(), workspaceId, providerApiKey);
+        checkEncryption(expectedProviderApiKey.id(), workspaceId, providerApiKey.apiKey());
 
-        String newProviderApiKey = factory.manufacturePojo(String.class);
-        llmProviderApiKeyResourceClient.updateProviderApiKey(expectedProviderApiKey.id(), newProviderApiKey, apiKey,
+        var providerApiKeyUpdate = factory.manufacturePojo(ProviderApiKeyUpdate.class);
+        llmProviderApiKeyResourceClient.updateProviderApiKey(expectedProviderApiKey.id(), providerApiKeyUpdate, apiKey,
                 workspaceName, 204);
-        checkEncryption(expectedProviderApiKey.id(), workspaceId, newProviderApiKey);
+
+        var expectedUpdatedProviderApiKey = expectedProviderApiKey.toBuilder()
+                .apiKey(providerApiKeyUpdate.apiKey())
+                .name(providerApiKeyUpdate.name())
+                .build();
+        getAndAssertProviderApiKey(expectedUpdatedProviderApiKey, apiKey, workspaceName);
+
+        checkEncryption(expectedProviderApiKey.id(), workspaceId, providerApiKeyUpdate.apiKey());
+    }
+
+    @Test
+    @DisplayName("Create and update provider Api Key for invalid name")
+    void createAndUpdateProviderApiKeyForInvalidName() {
+
+        String workspaceName = UUID.randomUUID().toString();
+        String apiKey = UUID.randomUUID().toString();
+        String workspaceId = UUID.randomUUID().toString();
+
+        mockTargetWorkspace(apiKey, workspaceName, workspaceId);
+
+        ProviderApiKey invalidNameProviderApiKey = factory.manufacturePojo(ProviderApiKey.class).toBuilder()
+                .name(StringUtils.repeat('x', 160))
+                .build();
+        llmProviderApiKeyResourceClient.createProviderApiKey(invalidNameProviderApiKey, apiKey, workspaceName, 422);
+
+        ProviderApiKey providerApiKey = factory.manufacturePojo(ProviderApiKey.class);
+        var expectedProviderApiKey = llmProviderApiKeyResourceClient.createProviderApiKey(providerApiKey, apiKey,
+                workspaceName, 201);
+
+        var providerApiKeyUpdate = factory.manufacturePojo(ProviderApiKeyUpdate.class).toBuilder()
+                .name(StringUtils.repeat('x', 160))
+                .build();
+        llmProviderApiKeyResourceClient.updateProviderApiKey(expectedProviderApiKey.id(), providerApiKeyUpdate, apiKey,
+                workspaceName, 422);
+    }
+
+    @ParameterizedTest
+    @MethodSource
+    @DisplayName("Create provider Api Key with invalid payload")
+    void createAndUpdateProviderApiKeyInvalidPayload(String body, String errorMsg) {
+
+        String workspaceName = UUID.randomUUID().toString();
+        String apiKey = UUID.randomUUID().toString();
+        String workspaceId = UUID.randomUUID().toString();
+
+        mockTargetWorkspace(apiKey, workspaceName, workspaceId);
+
+        try (var actualResponse = llmProviderApiKeyResourceClient.createProviderApiKey(body, apiKey, workspaceName,
+                400)) {
+            var actualError = actualResponse.readEntity(ErrorMessage.class);
+
+            assertThat(actualError.getMessage()).startsWith(errorMsg);
+        }
+    }
+
+    Stream<Arguments> createAndUpdateProviderApiKeyInvalidPayload() {
+        String body = "qwerty12345";
+        ProviderApiKey providerApiKey = factory.manufacturePojo(ProviderApiKey.class);
+        return Stream.of(
+                arguments(body,
+                        "Unable to process JSON. Unrecognized token '%s': was expecting (JSON String, Number (or 'NaN'/'+INF'/'-INF'), Array, Object or token 'null', 'true' or 'false')"
+                                .formatted(body)),
+                arguments(
+                        JsonUtils.writeValueAsString(providerApiKey).replace(providerApiKey.provider().getValue(),
+                                "something"),
+                        "Unable to process JSON. Cannot construct instance of `com.comet.opik.api.LlmProvider`, problem: Unknown llm provider 'something'"));
     }
 
     @Test
@@ -131,7 +206,7 @@ class LlmProviderApiKeyResourceTest {
         String workspaceName = UUID.randomUUID().toString();
         String apiKey = UUID.randomUUID().toString();
         String workspaceId = UUID.randomUUID().toString();
-        String providerApiKey = factory.manufacturePojo(String.class);
+        ProviderApiKey providerApiKey = factory.manufacturePojo(ProviderApiKey.class);
 
         mockTargetWorkspace(apiKey, workspaceName, workspaceId);
 
@@ -157,7 +232,7 @@ class LlmProviderApiKeyResourceTest {
         String workspaceName = UUID.randomUUID().toString();
         String apiKey = UUID.randomUUID().toString();
         String workspaceId = UUID.randomUUID().toString();
-        String providerApiKey = factory.manufacturePojo(String.class);
+        ProviderApiKey providerApiKey = factory.manufacturePojo(ProviderApiKey.class);
 
         mockTargetWorkspace(apiKey, workspaceName, workspaceId);
 
@@ -172,12 +247,13 @@ class LlmProviderApiKeyResourceTest {
         String workspaceName = UUID.randomUUID().toString();
         String apiKey = UUID.randomUUID().toString();
         String workspaceId = UUID.randomUUID().toString();
-        String providerApiKey = factory.manufacturePojo(String.class);
 
         mockTargetWorkspace(apiKey, workspaceName, workspaceId);
 
+        var providerApiKeyUpdate = factory.manufacturePojo(ProviderApiKeyUpdate.class);
         // for non-existing id
-        llmProviderApiKeyResourceClient.updateProviderApiKey(UUID.randomUUID(), providerApiKey, apiKey, workspaceName,
+        llmProviderApiKeyResourceClient.updateProviderApiKey(UUID.randomUUID(), providerApiKeyUpdate, apiKey,
+                workspaceName,
                 404);
     }
 
@@ -188,7 +264,7 @@ class LlmProviderApiKeyResourceTest {
         String workspaceName = UUID.randomUUID().toString();
         String apiKey = UUID.randomUUID().toString();
         String workspaceId = UUID.randomUUID().toString();
-        String providerApiKey = factory.manufacturePojo(String.class);
+        ProviderApiKey providerApiKey = factory.manufacturePojo(ProviderApiKey.class);
 
         mockTargetWorkspace(apiKey, workspaceName, workspaceId);
 
@@ -201,13 +277,15 @@ class LlmProviderApiKeyResourceTest {
                 workspaceName, 201);
         actualProviderApiKeyPage = llmProviderApiKeyResourceClient.getAll(workspaceName, apiKey);
         assertPage(actualProviderApiKeyPage, List.of(expectedProviderApiKey));
-
     }
 
     private void getAndAssertProviderApiKey(ProviderApiKey expected, String apiKey, String workspaceName) {
         var actualEntity = llmProviderApiKeyResourceClient.getById(expected.id(), workspaceName, apiKey, 200);
         assertThat(actualEntity.provider()).isEqualTo(expected.provider());
-        assertThat(actualEntity.apiKey()).isBlank();
+        assertThat(actualEntity.name()).isEqualTo(expected.name());
+
+        // We should decrypt api key in order to compare, since it encrypts on deserialization
+        assertThat(decrypt(actualEntity.apiKey())).isEqualTo(maskApiKey(expected.apiKey()));
     }
 
     private void checkEncryption(UUID id, String workspaceId, String expectedApiKey) {
@@ -215,7 +293,7 @@ class LlmProviderApiKeyResourceTest {
             var repository = handle.attach(LlmProviderApiKeyDAO.class);
             return repository.findById(id, workspaceId).apiKey();
         });
-        assertThat(EncryptionUtils.decrypt(actualEncryptedApiKey)).isEqualTo(expectedApiKey);
+        assertThat(decrypt(actualEncryptedApiKey)).isEqualTo(expectedApiKey);
     }
 
     private void assertPage(Page<ProviderApiKey> actual, List<ProviderApiKey> expected) {
@@ -224,7 +302,11 @@ class LlmProviderApiKeyResourceTest {
         assertThat(actual.total()).isEqualTo(expected.size());
         assertThat(actual.size()).isEqualTo(expected.size());
 
-        assertThat(actual.content().stream().map(ProviderApiKey::provider).toList())
-                .isEqualTo(expected.stream().map(ProviderApiKey::provider).toList());
+        for (int i = 0; i < expected.size(); i++) {
+            assertThat(actual.content().get(i).provider()).isEqualTo(expected.get(i).provider());
+            assertThat(actual.content().get(i).name()).isEqualTo(expected.get(i).name());
+            assertThat(decrypt(actual.content().get(i).apiKey()))
+                    .isEqualTo(maskApiKey(expected.get(i).apiKey()));
+        }
     }
 }

@@ -7,6 +7,7 @@ from json.decoder import JSONDecodeError
 from ..core.api_error import ApiError
 from ..types.project_page_public import ProjectPagePublic
 from ..core.pydantic_utilities import parse_obj_as
+from .types.provider_api_key_write_provider import ProviderApiKeyWriteProvider
 from ..errors.unauthorized_error import UnauthorizedError
 from ..types.error_message import ErrorMessage
 from ..errors.forbidden_error import ForbiddenError
@@ -47,7 +48,10 @@ class LlmProviderKeyClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.llm_provider_key.delete_llm_provider_api_keys_batch(
             ids=["ids"],
         )
@@ -89,7 +93,10 @@ class LlmProviderKeyClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.llm_provider_key.find_llm_provider_keys()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -112,14 +119,23 @@ class LlmProviderKeyClient:
         raise ApiError(status_code=_response.status_code, body=_response_json)
 
     def store_llm_provider_api_key(
-        self, *, api_key: str, request_options: typing.Optional[RequestOptions] = None
+        self,
+        *,
+        provider: ProviderApiKeyWriteProvider,
+        api_key: str,
+        name: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
         Store LLM Provider's ApiKey
 
         Parameters
         ----------
+        provider : ProviderApiKeyWriteProvider
+
         api_key : str
+
+        name : typing.Optional[str]
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
@@ -132,8 +148,12 @@ class LlmProviderKeyClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.llm_provider_key.store_llm_provider_api_key(
+            provider="openai",
             api_key="api_key",
         )
         """
@@ -141,8 +161,9 @@ class LlmProviderKeyClient:
             "v1/private/llm-provider-key",
             method="POST",
             json={
+                "provider": provider,
                 "api_key": api_key,
-                "provider": "openai",
+                "name": name,
             },
             headers={
                 "content-type": "application/json",
@@ -200,7 +221,10 @@ class LlmProviderKeyClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.llm_provider_key.get_llm_provider_api_key_by_id(
             id="id",
         )
@@ -239,6 +263,7 @@ class LlmProviderKeyClient:
         id: str,
         *,
         api_key: str,
+        name: typing.Optional[str] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -249,6 +274,8 @@ class LlmProviderKeyClient:
         id : str
 
         api_key : str
+
+        name : typing.Optional[str]
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
@@ -261,7 +288,10 @@ class LlmProviderKeyClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.llm_provider_key.update_llm_provider_api_key(
             id="id",
             api_key="api_key",
@@ -272,6 +302,7 @@ class LlmProviderKeyClient:
             method="PATCH",
             json={
                 "api_key": api_key,
+                "name": name,
             },
             headers={
                 "content-type": "application/json",
@@ -348,7 +379,10 @@ class AsyncLlmProviderKeyClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -398,7 +432,10 @@ class AsyncLlmProviderKeyClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -427,14 +464,23 @@ class AsyncLlmProviderKeyClient:
         raise ApiError(status_code=_response.status_code, body=_response_json)
 
     async def store_llm_provider_api_key(
-        self, *, api_key: str, request_options: typing.Optional[RequestOptions] = None
+        self,
+        *,
+        provider: ProviderApiKeyWriteProvider,
+        api_key: str,
+        name: typing.Optional[str] = OMIT,
+        request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
         Store LLM Provider's ApiKey
 
         Parameters
         ----------
+        provider : ProviderApiKeyWriteProvider
+
         api_key : str
+
+        name : typing.Optional[str]
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
@@ -449,11 +495,15 @@ class AsyncLlmProviderKeyClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
             await client.llm_provider_key.store_llm_provider_api_key(
+                provider="openai",
                 api_key="api_key",
             )
 
@@ -464,8 +514,9 @@ class AsyncLlmProviderKeyClient:
             "v1/private/llm-provider-key",
             method="POST",
             json={
+                "provider": provider,
                 "api_key": api_key,
-                "provider": "openai",
+                "name": name,
             },
             headers={
                 "content-type": "application/json",
@@ -525,7 +576,10 @@ class AsyncLlmProviderKeyClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -570,6 +624,7 @@ class AsyncLlmProviderKeyClient:
         id: str,
         *,
         api_key: str,
+        name: typing.Optional[str] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -580,6 +635,8 @@ class AsyncLlmProviderKeyClient:
         id : str
 
         api_key : str
+
+        name : typing.Optional[str]
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
@@ -594,7 +651,10 @@ class AsyncLlmProviderKeyClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -611,6 +671,7 @@ class AsyncLlmProviderKeyClient:
             method="PATCH",
             json={
                 "api_key": api_key,
+                "name": name,
             },
             headers={
                 "content-type": "application/json",

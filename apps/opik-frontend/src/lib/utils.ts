@@ -1,13 +1,18 @@
 import { type ClassValue, clsx } from "clsx";
-import round from "lodash/round";
 import isObject from "lodash/isObject";
+import isArray from "lodash/isArray";
+import last from "lodash/last";
+import get from "lodash/get";
+import round from "lodash/round";
 import isUndefined from "lodash/isUndefined";
-import { twMerge } from "tailwind-merge";
 import times from "lodash/times";
 import sample from "lodash/sample";
 import mapKeys from "lodash/mapKeys";
 import snakeCase from "lodash/snakeCase";
+import isString from "lodash/isString";
+import { twMerge } from "tailwind-merge";
 import { DEFAULT_WORKSPACE_NAME } from "@/constants/user";
+import { JsonNode } from "@/types/shared";
 
 const BASE_DOCUMENTATION_URL = "https://www.comet.com/docs/opik";
 
@@ -18,6 +23,63 @@ export const buildDocsUrl = (path: string = "", hash: string = "") => {
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+export const isStringMarkdown = (string: unknown): boolean => {
+  if (!isString(string)) {
+    return false;
+  }
+
+  // Return false for very short strings that are unlikely to be markdown
+  if (string.length < 3) {
+    return false;
+  }
+
+  // More comprehensive regex patterns for markdown detection
+  const markdownPatterns = [
+    // Headers (h1-h6)
+    /^#{1,6}\s+.+$/m,
+
+    // Emphasis (bold, italic, strikethrough)
+    /(\*\*|__).+?(\*\*|__)/, // bold
+    /(\*|_).+?(\*|_)/, // italic
+    /~~.+?~~/, // strikethrough
+
+    // Links and images
+    /\[.+?\]\(.+?\)/, // links
+    /!\[.+?\]\(.+?\)/, // images
+
+    // Lists
+    /^(\s*[*\-+]\s+.+)$/m, // unordered lists
+    /^(\s*\d+\.\s+.+)$/m, // ordered lists
+
+    // Blockquotes
+    /^>\s+.+$/m, // blockquotes
+
+    // Code
+    /```[\s\S]*?```/, // code blocks
+    /`[^`]+`/, // inline code
+
+    // Tables
+    /^\|.+\|\s*$/m, // table rows
+    /^[|\-:\s]+$/m, // table separators
+
+    // Horizontal rules
+    /^(\*{3,}|-{3,}|_{3,})$/m, // hr
+
+    // Task lists
+    /^\s*[*\-+]\s+\[[ xX]]\s+.+$/m, // task lists
+
+    // Definition lists
+    /^.+?\n:\s+.+$/m, // definition lists
+
+    // Footnote references and definitions
+    /\[\^.+?]/, // footnote references
+    /^\[\^.+?]:/m, // footnote definitions
+  ];
+
+  // Check for markdown patterns
+  return markdownPatterns.some((pattern) => pattern.test(string));
+};
 
 export const isValidJsonObject = (string: string) => {
   let json = null;
@@ -30,22 +92,40 @@ export const isValidJsonObject = (string: string) => {
   return json && isObject(json);
 };
 
-export const safelyParseJSON = (string: string) => {
+export const safelyParseJSON = (string: string, silent = false) => {
   try {
     return JSON.parse(string);
   } catch (e) {
-    console.error(e);
+    if (!silent) console.error(e);
     return {};
   }
 };
 
-export const millisecondsToSeconds = (milliseconds: number) => {
-  // rounds with precision, one character after the point
-  return round(milliseconds / 1000, 1);
-};
+export const getJSONPaths = (
+  node: JsonNode,
+  previousPath: string = "",
+  results: string[] = [],
+) => {
+  if (isObject(node) || isArray(node)) {
+    for (const key in node) {
+      const value = get(node, key);
+      const path = previousPath
+        ? isArray(node)
+          ? `${previousPath}[${key}]`
+          : `${previousPath}.${key}`
+        : key;
 
-export const secondsToMilliseconds = (seconds: number) => {
-  return seconds * 1000;
+      if (isArray(value)) {
+        getJSONPaths(value, path, results);
+      } else if (isObject(value)) {
+        getJSONPaths(value, path, results);
+      } else {
+        results.push(path);
+      }
+    }
+  }
+
+  return results;
 };
 
 export const getTextWidth = (
@@ -91,3 +171,23 @@ export const calculateWorkspaceName = (
   workspaceName: string,
   defaultName = "Personal",
 ) => (workspaceName === DEFAULT_WORKSPACE_NAME ? defaultName : workspaceName);
+
+export const extractIdFromLocation = (location: string) =>
+  last(location?.split("/"));
+
+export const formatNumericData = (value: number, precision = 3) =>
+  String(round(value, precision));
+
+export const updateTextAreaHeight = (
+  textarea: HTMLTextAreaElement | null,
+  minHeight: number = 80,
+) => {
+  if (!textarea) return;
+
+  const BORDER_WIDTH = 1;
+
+  textarea.style.height = `${minHeight}px`;
+  const scrollHeight = textarea.scrollHeight + BORDER_WIDTH * 2;
+
+  textarea.style.height = scrollHeight + "px";
+};

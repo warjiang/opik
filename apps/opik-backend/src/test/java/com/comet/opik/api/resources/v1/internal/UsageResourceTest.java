@@ -2,7 +2,8 @@ package com.comet.opik.api.resources.v1.internal;
 
 import com.comet.opik.api.BiInformationResponse;
 import com.comet.opik.api.Dataset;
-import com.comet.opik.api.Experiment;
+import com.comet.opik.api.Span;
+import com.comet.opik.api.SpansCountResponse;
 import com.comet.opik.api.Trace;
 import com.comet.opik.api.TraceCountResponse;
 import com.comet.opik.api.resources.utils.AuthTestUtils;
@@ -13,6 +14,9 @@ import com.comet.opik.api.resources.utils.MySQLContainerUtils;
 import com.comet.opik.api.resources.utils.RedisContainerUtils;
 import com.comet.opik.api.resources.utils.TestDropwizardAppExtensionUtils;
 import com.comet.opik.api.resources.utils.WireMockUtils;
+import com.comet.opik.api.resources.utils.resources.ExperimentResourceClient;
+import com.comet.opik.extensions.DropwizardAppExtensionProvider;
+import com.comet.opik.extensions.RegisterApp;
 import com.comet.opik.infrastructure.db.TransactionTemplateAsync;
 import com.comet.opik.podam.PodamFactoryUtils;
 import com.redis.testcontainers.RedisContainer;
@@ -27,7 +31,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.lifecycle.Startables;
@@ -55,27 +59,30 @@ import static org.testcontainers.shaded.org.awaitility.Awaitility.await;
 @DisplayName("Usage Resource Test")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @Slf4j
-public class UsageResourceTest {
+@ExtendWith(DropwizardAppExtensionProvider.class)
+class UsageResourceTest {
+
     public static final String USAGE_RESOURCE_URL_TEMPLATE = "%s/v1/internal/usage";
     public static final String TRACE_RESOURCE_URL_TEMPLATE = "%s/v1/private/traces";
+    public static final String SPANS_RESOURCE_URL_TEMPLATE = "%s/v1/private/spans";
     private static final String EXPERIMENT_RESOURCE_URL_TEMPLATE = "%s/v1/private/experiments";
     private static final String DATASET_RESOURCE_URL_TEMPLATE = "%s/v1/private/datasets";
 
-    private static final String USER = UUID.randomUUID().toString();
+    private final String USER = UUID.randomUUID().toString();
 
-    private static final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
+    private final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
 
-    private static final MySQLContainer<?> MYSQL_CONTAINER = MySQLContainerUtils.newMySQLContainer();
+    private final MySQLContainer<?> MYSQL_CONTAINER = MySQLContainerUtils.newMySQLContainer();
 
-    private static final ClickHouseContainer CLICK_HOUSE_CONTAINER = ClickHouseContainerUtils
+    private final ClickHouseContainer CLICK_HOUSE_CONTAINER = ClickHouseContainerUtils
             .newClickHouseContainer();
 
-    @RegisterExtension
-    private static final TestDropwizardAppExtension app;
+    @RegisterApp
+    private final TestDropwizardAppExtension APP;
 
-    private static final WireMockUtils.WireMockRuntime wireMock;
+    private final WireMockUtils.WireMockRuntime wireMock;
 
-    static {
+    {
         Startables.deepStart(REDIS, MYSQL_CONTAINER, CLICK_HOUSE_CONTAINER).join();
 
         wireMock = WireMockUtils.startWireMock();
@@ -83,7 +90,7 @@ public class UsageResourceTest {
         var databaseAnalyticsFactory = ClickHouseContainerUtils.newDatabaseAnalyticsFactory(
                 CLICK_HOUSE_CONTAINER, DATABASE_NAME);
 
-        app = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
+        APP = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
                 MYSQL_CONTAINER.getJdbcUrl(), databaseAnalyticsFactory, wireMock.runtimeInfo(), REDIS.getRedisURI());
     }
 
@@ -93,6 +100,7 @@ public class UsageResourceTest {
     private ClientSupport client;
     private TransactionTemplateAsync clickHouseTemplate;
     private TransactionTemplate mySqlTemplate;
+    private ExperimentResourceClient experimentResourceClient;
 
     @BeforeAll
     void setUpAll(ClientSupport client, Jdbi jdbi, TransactionTemplateAsync clickHouseTemplate,
@@ -101,7 +109,7 @@ public class UsageResourceTest {
         MigrationUtils.runDbMigration(jdbi, MySQLContainerUtils.migrationParameters());
 
         try (var connection = CLICK_HOUSE_CONTAINER.createConnection("")) {
-            MigrationUtils.runDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
+            MigrationUtils.runClickhouseDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
                     ClickHouseContainerUtils.migrationParameters());
         }
 
@@ -111,6 +119,8 @@ public class UsageResourceTest {
         this.mySqlTemplate = mySqlTemplate;
 
         ClientSupportUtils.config(client);
+
+        this.experimentResourceClient = new ExperimentResourceClient(client, baseURI, factory);
     }
 
     @AfterAll
@@ -118,7 +128,7 @@ public class UsageResourceTest {
         wireMock.server().stop();
     }
 
-    private static void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
+    private void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
         AuthTestUtils.mockTargetWorkspace(wireMock.server(), apiKey, workspaceName, workspaceId, USER);
     }
 
@@ -174,6 +184,53 @@ public class UsageResourceTest {
         }
 
         @Test
+        @DisplayName("Get spans count on previous day for all workspaces, no Auth")
+        void spansCountForWorkspace() {
+            var spans = PodamFactoryUtils.manufacturePojoList(factory, Span.class)
+                    .stream()
+                    .map(e -> e.toBuilder()
+                            .id(null)
+                            .build())
+                    .toList();
+
+            // Setup mock workspace with spans
+            var workspaceId = UUID.randomUUID().toString();
+            var apiKey = UUID.randomUUID().toString();
+            int spansCount = setupEntitiesForWorkspace(workspaceId, apiKey, spans, SPANS_RESOURCE_URL_TEMPLATE);
+
+            // Change created_at to the previous day in order to capture those spans in count query, since for Stripe we
+            // need to count it daily for yesterday
+            subtractClickHouseTableRecordsCreatedAtOneDay("spans").accept(workspaceId);
+
+            // Setup second workspace with spans, but leave created_at date set to today, so spans do not end up in the
+            // pool
+            var workspaceIdForToday = UUID.randomUUID().toString();
+            var apiKey2 = UUID.randomUUID().toString();
+
+            setupEntitiesForWorkspace(workspaceIdForToday, apiKey2, spans, SPANS_RESOURCE_URL_TEMPLATE);
+
+            try (var actualResponse = client.target(USAGE_RESOURCE_URL_TEMPLATE.formatted(baseURI))
+                    .path("/workspace-span-counts")
+                    .request()
+                    .get()) {
+
+                var response = validateResponse(actualResponse, SpansCountResponse.class);
+
+                var workspaceSpanCount = getMatch(response.workspacesSpansCount(),
+                        workspaceCount -> workspaceCount.workspace().equals(workspaceId));
+
+                assertThat(workspaceSpanCount).isPresent();
+                assertThat(workspaceSpanCount.get())
+                        .isEqualTo(new SpansCountResponse.WorkspaceSpansCount(workspaceId, spansCount));
+
+                // Check that today's workspace is not returned
+                var workspaceSpanCountToday = getMatch(response.workspacesSpansCount(),
+                        workspaceCount -> workspaceCount.workspace().equals(workspaceIdForToday));
+                assertThat(workspaceSpanCountToday).isEmpty();
+            }
+        }
+
+        @Test
         @DisplayName("Get traces daily info for BI events, no Auth")
         void traceBiInfoTest() {
             var traces = PodamFactoryUtils.manufacturePojoList(factory, Trace.class)
@@ -189,12 +246,7 @@ public class UsageResourceTest {
         @Test
         @DisplayName("Get experiments daily info for BI events, no Auth")
         void experimentBiInfoTest() {
-            var experiments = PodamFactoryUtils.manufacturePojoList(factory, Experiment.class)
-                    .stream()
-                    .map(e -> e.toBuilder()
-                            .promptVersion(null)
-                            .build())
-                    .toList();
+            var experiments = experimentResourceClient.generateExperimentList();
             biInfoTest(experiments, EXPERIMENT_RESOURCE_URL_TEMPLATE, "experiments",
                     subtractClickHouseTableRecordsCreatedAtOneDay("experiments"));
         }

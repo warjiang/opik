@@ -3,6 +3,7 @@ name: opik
 services:
   mysql:
     image: mysql:8.4.2
+    pull_policy: always
     hostname: mysql
     environment:
       MYSQL_ROOT_PASSWORD: opik
@@ -14,17 +15,14 @@ services:
       timeout: 1s
       interval: 1s
       retries: 300
-    ports:
-      - "3306"
     volumes:
       - mysql:/var/lib/mysql/:type=volume,source=~/opik/mysql
 
   redis:
     image: redis:7.2.4-alpine3.19
+    pull_policy: always
     hostname: redis
     command: redis-server --requirepass opik
-    ports:
-      - '6379'
     healthcheck:
       test: [ "CMD", "nc", "-z", "localhost", "6379" ]
       interval: 2s
@@ -34,6 +32,7 @@ services:
 
   clickhouse:
     image: clickhouse/clickhouse-server:24.3.6.48-alpine
+    pull_policy: always
     hostname: clickhouse
     environment:
       CLICKHOUSE_DB: opik
@@ -42,9 +41,6 @@ services:
       # Enables SQL-driven Access Control and Account Management:
       # https://clickhouse.com/docs/en/operations/access-rights#enabling-access-control
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
-    ports:
-      - "8123" # HTTP default port
-      - "9000" # Native Protocol port
     volumes:
       - clickhouse:/var/lib/clickhouse/:type=volume,source=~/opik/clickhouse/data
       - clickhouse-server:/var/log/clickhouse-server/:type=volume,source=~/opik/clickhouse/logs
@@ -56,6 +52,7 @@ services:
 
   backend:
     image: ghcr.io/comet-ml/opik/opik-backend:${OPIK_VERSION:-latest}
+    pull_policy: always
     build:
       context: ../../apps/opik-backend
       dockerfile: Dockerfile
@@ -64,6 +61,7 @@ services:
     hostname: backend
     command: [ "bash", "-c", "./run_db_migrations.sh && ./entrypoint.sh" ]
     environment:
+      # WARNING: Do not set OPIK_VERSION as env var here. It's a multi-stage build, so build and runtime values can differ.
       DOCKER_BUILDKIT: 1
       STATE_DB_PROTOCOL: "jdbc:mysql://"
       STATE_DB_URL: "mysql:3306/opik?createDatabaseIfNotExist=true&rewriteBatchedStatements=true"
@@ -78,11 +76,11 @@ services:
       ANALYTICS_DB_PORT: 8123
       ANALYTICS_DB_USERNAME: opik
       ANALYTICS_DB_DATABASE_NAME: opik
-      JAVA_OPTS: "-Dliquibase.propertySubstitutionEnabled=true"
+      JAVA_OPTS: "-Dliquibase.propertySubstitutionEnabled=true -XX:+UseG1GC -XX:MaxRAMPercentage=80.0"
       REDIS_URL: redis://:opik@redis:6379/
       ANALYTICS_DB_PASS: opik
       OPIK_OTEL_SDK_ENABLED: false
-      OTEL_VERSION: 2.9.0
+      OTEL_VERSION: 2.12.0
       OTEL_PROPAGATORS: "tracecontext,baggage,b3"
       OTEL_EXPERIMENTAL_EXPORTER_OTLP_RETRY_ENABLED: true
       OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION: BASE2_EXPONENTIAL_BUCKET_HISTOGRAM
@@ -90,22 +88,35 @@ services:
       OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: delta
       OPIK_USAGE_REPORT_ENABLED: ${OPIK_USAGE_REPORT_ENABLED:-true}
     ports:
-      - "8080"
-      - "3003"
+      - "3003" # OpenAPI specification port
     depends_on:
       mysql:
         condition: service_healthy
       clickhouse:
         condition: service_healthy
 
+  python-backend:
+    image: ghcr.io/comet-ml/opik/opik-python-backend:${OPIK_VERSION:-latest}
+    pull_policy: always
+    build:
+      context: ../../apps/opik-python-backend
+      dockerfile: Dockerfile
+    hostname: python-backend
+    privileged: true # Required for Docker-in-Docker, so it can launch containers
+    environment:
+      PYTHON_CODE_EXECUTOR_IMAGE_TAG: ${OPIK_VERSION:-latest}
+      OPIK_VERSION: ${OPIK_VERSION:-latest}
+      OPIK_REVERSE_PROXY_URL: "http://frontend:5173/api"
+
   frontend:
     image: ghcr.io/comet-ml/opik/opik-frontend:${OPIK_VERSION:-latest}
+    pull_policy: always
     build:
       context: ../../apps/opik-frontend
       dockerfile: Dockerfile
     hostname: frontend
     ports:
-      - "5173:5173"
+      - "5173:5173" # Frontend server port
     extra_hosts:
       - "apihost:host-gateway"
     volumes:
@@ -113,6 +124,8 @@ services:
     depends_on:
       backend:
         condition: service_started
+    environment: 
+      OPIK_VERSION: ${OPIK_VERSION:-latest}
 
 networks:
   default:

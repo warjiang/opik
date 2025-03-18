@@ -2,10 +2,11 @@ package com.comet.opik.api.resources.utils;
 
 import com.comet.opik.OpikApplication;
 import com.comet.opik.infrastructure.DatabaseAnalyticsFactory;
-import com.comet.opik.infrastructure.auth.TestHttpClientUtils;
 import com.comet.opik.infrastructure.events.EventModule;
 import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
 import com.google.common.eventbus.EventBus;
+import com.google.inject.AbstractModule;
+import com.google.inject.Module;
 import lombok.Builder;
 import lombok.experimental.UtilityClass;
 import org.apache.commons.collections4.CollectionUtils;
@@ -17,6 +18,7 @@ import ru.vyarus.dropwizard.guice.test.jupiter.ext.TestDropwizardAppExtension;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static com.comet.opik.infrastructure.RateLimitConfig.LimitConfig;
 
@@ -32,9 +34,10 @@ public class TestDropwizardAppExtensionUtils {
             DatabaseAnalyticsFactory databaseAnalyticsFactory,
             WireMockRuntimeInfo runtimeInfo,
             String redisUrl,
-            Integer cacheTtlInSeconds,
+            Integer authCacheTtlInSeconds,
             boolean rateLimitEnabled,
             Long limit,
+            Long workspaceLimit,
             Long limitDurationInSeconds,
             Map<String, LimitConfig> customLimits,
             List<Object> customBeans,
@@ -46,7 +49,10 @@ public class TestDropwizardAppExtensionUtils {
             String metadataVersion,
             EventBus mockEventBus,
             boolean corsEnabled,
-            List<CustomConfig> customConfigs) {
+            List<CustomConfig> customConfigs,
+            List<Class<? extends Module>> disableModules,
+            List<AbstractModule> modules,
+            String minioUrl) {
     }
 
     public static TestDropwizardAppExtension newTestDropwizardAppExtension(String jdbcUrl,
@@ -77,14 +83,14 @@ public class TestDropwizardAppExtensionUtils {
             DatabaseAnalyticsFactory databaseAnalyticsFactory,
             WireMockRuntimeInfo runtimeInfo,
             String redisUrl,
-            Integer cacheTtlInSeconds) {
+            Integer authCacheTtlInSeconds) {
         return newTestDropwizardAppExtension(
                 AppContextConfig.builder()
                         .jdbcUrl(jdbcUrl)
                         .databaseAnalyticsFactory(databaseAnalyticsFactory)
                         .runtimeInfo(runtimeInfo)
                         .redisUrl(redisUrl)
-                        .cacheTtlInSeconds(cacheTtlInSeconds)
+                        .authCacheTtlInSeconds(authCacheTtlInSeconds)
                         .build());
     }
 
@@ -118,13 +124,22 @@ public class TestDropwizardAppExtensionUtils {
             configs.add("authentication.ui.url: "
                     + "%s/opik/auth-session".formatted(appContextConfig.runtimeInfo().getHttpsBaseUrl()));
 
-            if (appContextConfig.cacheTtlInSeconds() != null) {
-                configs.add("authentication.apiKeyResolutionCacheTTLInSec: " + appContextConfig.cacheTtlInSeconds());
+            if (appContextConfig.authCacheTtlInSeconds() != null) {
+                configs.add(
+                        "authentication.apiKeyResolutionCacheTTLInSec: " + appContextConfig.authCacheTtlInSeconds());
             }
+        }
+
+        if (appContextConfig.minioUrl() != null) {
+            configs.add("s3Config.s3Url: " + appContextConfig.minioUrl());
         }
 
         GuiceyConfigurationHook hook = injector -> {
             injector.modulesOverride(TestHttpClientUtils.testAuthModule());
+
+            Optional.ofNullable(appContextConfig.disableModules)
+                    .orElse(List.of())
+                    .forEach(injector::disableModules);
 
             if (appContextConfig.mockEventBus() != null) {
                 injector.modulesOverride(new EventModule() {
@@ -147,6 +162,9 @@ public class TestDropwizardAppExtensionUtils {
                 }
             });
 
+            Optional.ofNullable(appContextConfig.modules)
+                    .orElse(List.of())
+                    .forEach(injector::modulesOverride);
         };
 
         if (appContextConfig.redisUrl() != null) {
@@ -161,12 +179,32 @@ public class TestDropwizardAppExtensionUtils {
             configs.add("rateLimit.generalLimit.durationInSeconds: %d"
                     .formatted(appContextConfig.limitDurationInSeconds()));
 
+            configs.add("rateLimit.generalLimit.headerName: %s".formatted("User"));
+            configs.add("rateLimit.generalLimit.userFacingBucketName: %s".formatted("general_events"));
+            configs.add("rateLimit.generalLimit.errorMessage: %s"
+                    .formatted("You have exceeded the rate limit for user general events. Please try again later."));
+
+            configs.add("rateLimit.workspaceLimit.limit: %d".formatted(appContextConfig.workspaceLimit()));
+            configs.add("rateLimit.workspaceLimit.durationInSeconds: %d"
+                    .formatted(appContextConfig.limitDurationInSeconds()));
+
+            configs.add("rateLimit.workspaceLimit.headerName: %s".formatted("Workspace"));
+            configs.add("rateLimit.workspaceLimit.userFacingBucketName: %s".formatted("workspace_events"));
+            configs.add("rateLimit.workspaceLimit.errorMessage: %s"
+                    .formatted("You have exceeded the rate limit for workspace events. Please try again later."));
+
             if (appContextConfig.customLimits() != null) {
                 appContextConfig.customLimits()
                         .forEach((bucket, limitConfig) -> {
                             configs.add("rateLimit.customLimits.%s.limit: %d".formatted(bucket, limitConfig.limit()));
                             configs.add("rateLimit.customLimits.%s.durationInSeconds: %d".formatted(bucket,
                                     limitConfig.durationInSeconds()));
+                            configs.add("rateLimit.customLimits.%s.headerName: %s".formatted(bucket,
+                                    limitConfig.headerName()));
+                            configs.add("rateLimit.customLimits.%s.userFacingBucketName: %s".formatted(bucket,
+                                    limitConfig.userFacingBucketName()));
+                            configs.add("rateLimit.customLimits.%s.errorMessage: %s".formatted(bucket,
+                                    limitConfig.errorMessage()));
                         });
             }
         }

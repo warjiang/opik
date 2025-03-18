@@ -1,56 +1,29 @@
-import {
-  ProviderMessageType,
-  PLAYGROUND_MESSAGE_ROLE,
-  PlaygroundMessageType,
-  PlaygroundPromptConfigsType,
-} from "@/types/playground";
+import { PlaygroundPromptType } from "@/types/playground";
 import { generateRandomString } from "@/lib/utils";
 import {
+  DEFAULT_ANTHROPIC_CONFIGS,
+  DEFAULT_GEMINI_CONFIGS,
   DEFAULT_OPEN_AI_CONFIGS,
-  PROVIDER_MODELS,
-} from "@/constants/playground";
+  DEFAULT_OPEN_ROUTER_CONFIGS,
+} from "@/constants/llm";
 import {
-  PlaygroundOpenAIConfigsType,
+  LLMAnthropicConfigsType,
+  LLMGeminiConfigsType,
+  LLMOpenAIConfigsType,
+  LLMOpenRouterConfigsType,
+  LLMPromptConfigsType,
   PROVIDER_MODEL_TYPE,
   PROVIDER_TYPE,
 } from "@/types/providers";
-
-export const generateDefaultPlaygroundPromptMessage = (
-  message: Partial<PlaygroundMessageType> = {},
-): PlaygroundMessageType => {
-  return {
-    content: "",
-    role: PLAYGROUND_MESSAGE_ROLE.system,
-    ...message,
-    id: generateRandomString(),
-  };
-};
-
-export const getModelProvider = (
-  modelName: PROVIDER_MODEL_TYPE,
-): PROVIDER_TYPE | "" => {
-  const provider = Object.entries(PROVIDER_MODELS).find(
-    ([providerName, providerModels]) => {
-      if (providerModels.find((pm) => modelName === pm.value)) {
-        return providerName;
-      }
-
-      return false;
-    },
-  );
-
-  if (!provider) {
-    return "";
-  }
-
-  const [providerName] = provider;
-
-  return providerName as PROVIDER_TYPE;
-};
+import { generateDefaultLLMPromptMessage } from "@/lib/llm";
+import {
+  ModelResolver,
+  ProviderResolver,
+} from "@/hooks/useLLMProviderModelsData";
 
 export const getDefaultConfigByProvider = (
-  provider: PROVIDER_TYPE,
-): PlaygroundPromptConfigsType => {
+  provider?: PROVIDER_TYPE | "",
+): LLMPromptConfigsType => {
   if (provider === PROVIDER_TYPE.OPEN_AI) {
     return {
       temperature: DEFAULT_OPEN_AI_CONFIGS.TEMPERATURE,
@@ -58,16 +31,67 @@ export const getDefaultConfigByProvider = (
       topP: DEFAULT_OPEN_AI_CONFIGS.TOP_P,
       frequencyPenalty: DEFAULT_OPEN_AI_CONFIGS.FREQUENCY_PENALTY,
       presencePenalty: DEFAULT_OPEN_AI_CONFIGS.PRESENCE_PENALTY,
-    } as PlaygroundOpenAIConfigsType;
+    } as LLMOpenAIConfigsType;
   }
+
+  if (provider === PROVIDER_TYPE.ANTHROPIC) {
+    return {
+      temperature: DEFAULT_ANTHROPIC_CONFIGS.TEMPERATURE,
+      maxCompletionTokens: DEFAULT_ANTHROPIC_CONFIGS.MAX_COMPLETION_TOKENS,
+      topP: DEFAULT_ANTHROPIC_CONFIGS.TOP_P,
+    } as LLMAnthropicConfigsType;
+  }
+
+  if (provider === PROVIDER_TYPE.OPEN_ROUTER) {
+    return {
+      maxTokens: DEFAULT_OPEN_ROUTER_CONFIGS.MAX_TOKENS,
+      temperature: DEFAULT_OPEN_ROUTER_CONFIGS.TEMPERATURE,
+      topP: DEFAULT_OPEN_ROUTER_CONFIGS.TOP_P,
+      topK: DEFAULT_OPEN_ROUTER_CONFIGS.TOP_K,
+      frequencyPenalty: DEFAULT_OPEN_ROUTER_CONFIGS.FREQUENCY_PENALTY,
+      presencePenalty: DEFAULT_OPEN_ROUTER_CONFIGS.PRESENCE_PENALTY,
+      repetitionPenalty: DEFAULT_OPEN_ROUTER_CONFIGS.REPETITION_PENALTY,
+      minP: DEFAULT_OPEN_ROUTER_CONFIGS.MIN_P,
+      topA: DEFAULT_OPEN_ROUTER_CONFIGS.TOP_A,
+    } as LLMOpenRouterConfigsType;
+  }
+
+  if (provider === PROVIDER_TYPE.GEMINI) {
+    return {
+      temperature: DEFAULT_GEMINI_CONFIGS.TEMPERATURE,
+      maxCompletionTokens: DEFAULT_GEMINI_CONFIGS.MAX_COMPLETION_TOKENS,
+      topP: DEFAULT_GEMINI_CONFIGS.TOP_P,
+    } as LLMGeminiConfigsType;
+  }
+
   return {};
 };
 
-export const transformMessageIntoProviderMessage = (
-  message: PlaygroundMessageType,
-): ProviderMessageType => {
+interface GenerateDefaultPromptParams {
+  initPrompt?: Partial<PlaygroundPromptType>;
+  setupProviders: PROVIDER_TYPE[];
+  lastPickedModel?: PROVIDER_MODEL_TYPE | "";
+  providerResolver: ProviderResolver;
+  modelResolver: ModelResolver;
+}
+
+export const generateDefaultPrompt = ({
+  initPrompt = {},
+  setupProviders = [],
+  lastPickedModel,
+  providerResolver,
+  modelResolver,
+}: GenerateDefaultPromptParams): PlaygroundPromptType => {
+  const modelByDefault = modelResolver(lastPickedModel || "", setupProviders);
+  const provider = providerResolver(modelByDefault);
+
   return {
-    role: message.role,
-    content: message.content,
+    name: "Prompt",
+    messages: [generateDefaultLLMPromptMessage()],
+    model: modelByDefault,
+    provider,
+    configs: getDefaultConfigByProvider(provider),
+    ...initPrompt,
+    id: generateRandomString(),
   };
 };

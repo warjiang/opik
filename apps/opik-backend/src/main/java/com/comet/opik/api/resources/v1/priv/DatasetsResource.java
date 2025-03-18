@@ -15,7 +15,7 @@ import com.comet.opik.api.ExperimentItem;
 import com.comet.opik.api.PageColumns;
 import com.comet.opik.api.filter.ExperimentsComparisonFilter;
 import com.comet.opik.api.filter.FiltersFactory;
-import com.comet.opik.api.resources.v1.priv.validate.ExperimentParamsValidator;
+import com.comet.opik.api.resources.v1.priv.validate.IdParamsValidator;
 import com.comet.opik.api.sorting.SortingFactoryDatasets;
 import com.comet.opik.api.sorting.SortingField;
 import com.comet.opik.domain.DatasetItemService;
@@ -272,7 +272,7 @@ public class DatasetsResource {
             @PathParam("id") UUID id,
             @QueryParam("page") @Min(1) @DefaultValue("1") int page,
             @QueryParam("size") @Min(1) @DefaultValue("10") int size,
-            @QueryParam("truncate") boolean truncate) {
+            @QueryParam("truncate") @Schema(description = "Truncate image included in either input, output or metadata") boolean truncate) {
 
         String workspaceId = requestContext.get().getWorkspaceId();
         log.info("Finding dataset items by id '{}', page '{}', size '{} on workspace_id '{}''", id, page, size,
@@ -299,11 +299,9 @@ public class DatasetsResource {
             @RequestBody(content = @Content(schema = @Schema(implementation = DatasetItemStreamRequest.class))) @NotNull @Valid DatasetItemStreamRequest request) {
         var workspaceId = requestContext.get().getWorkspaceId();
         var userName = requestContext.get().getUserName();
-        var workspaceName = requestContext.get().getWorkspaceName();
         log.info("Streaming dataset items by '{}' on workspaceId '{}'", request, workspaceId);
         var items = itemService.getItems(workspaceId, request)
                 .contextWrite(ctx -> ctx.put(RequestContext.USER_NAME, userName)
-                        .put(RequestContext.WORKSPACE_NAME, workspaceName)
                         .put(RequestContext.WORKSPACE_ID, workspaceId));
         var outputStream = streamer.getOutputStream(items);
         log.info("Streamed dataset items by '{}' on workspaceId '{}'", request, workspaceId);
@@ -373,9 +371,9 @@ public class DatasetsResource {
             @QueryParam("size") @Min(1) @DefaultValue("10") int size,
             @QueryParam("experiment_ids") @NotNull @NotBlank String experimentIdsQueryParam,
             @QueryParam("filters") String filters,
-            @QueryParam("truncate") boolean truncate) {
+            @QueryParam("truncate") @Schema(description = "Truncate image included in either input, output or metadata") boolean truncate) {
 
-        var experimentIds = ExperimentParamsValidator.getExperimentIds(experimentIdsQueryParam);
+        var experimentIds = IdParamsValidator.getIds(experimentIdsQueryParam);
 
         var queryFilters = filtersFactory.newFilters(filters, ExperimentsComparisonFilter.LIST_TYPE_REFERENCE);
 
@@ -413,7 +411,7 @@ public class DatasetsResource {
 
         var experimentIds = Optional.ofNullable(experimentIdsQueryParam)
                 .filter(Predicate.not(String::isEmpty))
-                .map(ExperimentParamsValidator::getExperimentIds)
+                .map(IdParamsValidator::getIds)
                 .orElse(null);
 
         String workspaceId = requestContext.get().getWorkspaceId();

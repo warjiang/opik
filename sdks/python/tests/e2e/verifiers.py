@@ -29,6 +29,7 @@ def verify_trace(
     feedback_scores: List[FeedbackScoreDict] = mock.ANY,  # type: ignore
     project_name: Optional[str] = mock.ANY,  # type: ignore
     error_info: Optional[ErrorInfoDict] = mock.ANY,  # type: ignore
+    thread_id: Optional[str] = mock.ANY,  # type: ignore
 ):
     if not synchronization.until(
         lambda: (opik_client.get_trace_content(id=trace_id) is not None),
@@ -51,11 +52,19 @@ def verify_trace(
         _try_get__dict__(trace.error_info) == error_info
     ), testlib.prepare_difference_report(trace.error_info, error_info)
 
+    assert thread_id == trace.thread_id, f"{trace.thread_id} != {thread_id}"
+
     if project_name is not mock.ANY:
         trace_project = opik_client.get_project(trace.project_id)
         assert trace_project.name == project_name
 
     if feedback_scores is not mock.ANY:
+        if trace.feedback_scores is None:
+            assert (
+                feedback_scores is None
+            ), f"Expected feedback scores to be None, but got {feedback_scores}"
+            return
+
         actual_feedback_scores = (
             [] if trace.feedback_scores is None else trace.feedback_scores
         )
@@ -102,6 +111,7 @@ def verify_span(
     model: Optional[str] = mock.ANY,  # type: ignore
     provider: Optional[str] = mock.ANY,  # type: ignore
     error_info: Optional[ErrorInfoDict] = mock.ANY,  # type: ignore
+    total_cost: Optional[float] = mock.ANY,  # type: ignore
 ):
     if not synchronization.until(
         lambda: (opik_client.get_span_content(id=span_id) is not None),
@@ -132,14 +142,23 @@ def verify_span(
     assert (
         _try_get__dict__(span.error_info) == error_info
     ), testlib.prepare_difference_report(span.error_info, error_info)
-    assert span.model == model
-    assert span.provider == provider
+    assert span.model == model, f"{span.model} != {model}"
+    assert span.provider == provider, f"{span.provider} != {provider}"
+    assert (
+        span.total_estimated_cost == total_cost
+    ), f"{span.total_estimated_cost} != {total_cost}"
 
     if project_name is not mock.ANY:
         span_project = opik_client.get_project(span.project_id)
         assert span_project.name == project_name
 
     if feedback_scores is not mock.ANY:
+        if span.feedback_scores is None:
+            assert (
+                feedback_scores is None
+            ), f"Expected feedback scores to be None, but got {feedback_scores}"
+            return
+
         actual_feedback_scores = (
             [] if span.feedback_scores is None else span.feedback_scores
         )
@@ -211,7 +230,7 @@ def verify_experiment(
     experiment_metadata: Optional[Dict[str, Any]],
     feedback_scores_amount: int,
     traces_amount: int,
-    prompt: Optional[Prompt] = None,
+    prompts: Optional[List[Prompt]] = None,
 ):
     rest_client = (
         opik_client._rest_client
@@ -227,7 +246,7 @@ def verify_experiment(
 
     experiment_content = rest_client.experiments.get_experiment_by_id(id)
 
-    verify_experiment_metadata(experiment_content, experiment_metadata)
+    _verify_experiment_metadata(experiment_content, experiment_metadata)
 
     assert (
         experiment_content.name == experiment_name
@@ -249,10 +268,10 @@ def verify_experiment(
         actual_trace_count == traces_amount
     ), f"{actual_trace_count} != {traces_amount}"
 
-    verify_experiment_prompt(experiment_content, prompt)
+    _verify_experiment_prompts(experiment_content, prompts)
 
 
-def verify_experiment_metadata(
+def _verify_experiment_metadata(
     experiment_content: ExperimentPublic,
     metadata: Optional[Dict[str, Any]],
 ):
@@ -260,31 +279,42 @@ def verify_experiment_metadata(
     if experiment_content.metadata is not None:
         experiment_metadata = {**experiment_content.metadata}
         experiment_metadata.pop("prompt", None)
+        experiment_metadata.pop("prompts", None)
 
     assert experiment_metadata == metadata, f"{experiment_metadata} != {metadata}"
 
 
-def verify_experiment_prompt(
+def _verify_experiment_prompts(
     experiment_content: ExperimentPublic,
-    prompt: Optional[Prompt],
+    prompts: Optional[List[Prompt]],
 ):
-    if prompt is None:
+    if prompts is None:
         return
 
     # asserting Prompt vs Experiment.prompt_version
-    assert (
-        experiment_content.prompt_version.id == prompt.__internal_api__version_id__
-    ), f"{experiment_content.prompt_version.id} != {prompt.__internal_api__version_id__}"
+    experiment_content_prompt_versions = sorted(
+        experiment_content.prompt_versions, key=lambda x: x.id
+    )
+    prompts = sorted(prompts, key=lambda x: x.__internal_api__version_id__)
 
-    assert (
-        experiment_content.prompt_version.prompt_id
-        == prompt.__internal_api__prompt_id__
-    ), f"{experiment_content.prompt_version.prompt_id} != {prompt.__internal_api__prompt_id__}"
+    for i, prompt in enumerate(prompts):
+        assert (
+            experiment_content_prompt_versions[i].id
+            == prompt.__internal_api__version_id__
+        ), f"{experiment_content_prompt_versions[i].id} != {prompt.__internal_api__version_id__}"
+        assert (
+            experiment_content_prompt_versions[i].prompt_id
+            == prompt.__internal_api__prompt_id__
+        ), f"{experiment_content_prompt_versions[i].prompt_id} != {prompt.__internal_api__prompt_id__}"
 
-    assert (
-        experiment_content.prompt_version.commit == prompt.commit
-    ), f"{experiment_content.prompt_version.commit} != {prompt.commit}"
+        assert (
+            experiment_content_prompt_versions[i].commit == prompt.commit
+        ), f"{experiment_content_prompt_versions[i].commit} != {prompt.commit}"
 
     # check that experiment config/metadata contains Prompt's template
-    experiment_prompt = experiment_content.metadata["prompt"]
-    assert experiment_prompt == prompt.prompt, f"{experiment_prompt} != {prompt.prompt}"
+    experiment_prompts = experiment_content.metadata["prompts"]
+
+    for i, prompt in enumerate(prompts):
+        assert (
+            experiment_prompts[i] == prompt.prompt
+        ), f"{experiment_prompts[i]} != {prompt.prompt}"

@@ -60,6 +60,8 @@ public interface DatasetService {
 
     Dataset findById(UUID id);
 
+    String findWorkspaceIdByDatasetId(UUID id);
+
     Dataset findById(UUID id, String workspaceId);
 
     List<Dataset> findByIds(Set<UUID> ids, String workspaceId);
@@ -210,6 +212,17 @@ class DatasetServiceImpl implements DatasetService {
     }
 
     @Override
+    public String findWorkspaceIdByDatasetId(@NonNull UUID id) {
+        log.info("Finding workspaceId by dataset id '{}'", id);
+        return template.inTransaction(READ_ONLY, handle -> {
+            var dao = handle.attach(DatasetDAO.class);
+            var workspaceId = dao.findWorkspaceIdByDatasetId(id).orElseThrow(this::newNotFoundException);
+            log.info("Found workspaceId by dataset id '{}'", id);
+            return workspaceId;
+        });
+    }
+
+    @Override
     public Dataset findById(@NonNull UUID id, @NonNull String workspaceId) {
         log.info("Finding dataset with id '{}', workspaceId '{}'", id, workspaceId);
         return template.inTransaction(READ_ONLY, handle -> {
@@ -305,14 +318,13 @@ class DatasetServiceImpl implements DatasetService {
     public DatasetPage find(int page, int size, @NonNull DatasetCriteria criteria, List<SortingField> sortingFields) {
         String workspaceId = requestContext.get().getWorkspaceId();
         String userName = requestContext.get().getUserName();
-        String workspaceName = requestContext.get().getWorkspaceName();
 
         String sortingFieldsSql = sortingQueryBuilder.toOrderBySql(sortingFields);
 
         if (criteria.withExperimentsOnly() || criteria.promptId() != null) {
 
             Mono<Set<UUID>> datasetIds = experimentDAO.findAllDatasetIds(criteria)
-                    .contextWrite(ctx -> AsyncUtils.setRequestContext(ctx, userName, workspaceName, workspaceId))
+                    .contextWrite(ctx -> AsyncUtils.setRequestContext(ctx, userName, workspaceId))
                     .map(dto -> dto.stream()
                             .map(ExperimentDatasetId::datasetId)
                             .collect(toSet()));

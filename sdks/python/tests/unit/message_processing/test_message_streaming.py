@@ -24,6 +24,7 @@ def create_span_message():
         model=NOT_USED,
         provider=NOT_USED,
         error_info=NOT_USED,
+        total_cost=NOT_USED,
     )
 
 
@@ -39,6 +40,7 @@ def create_trace_message():
         metadata=NOT_USED,
         tags=NOT_USED,
         error_info=NOT_USED,
+        thread_id=NOT_USED,
     )
 
 

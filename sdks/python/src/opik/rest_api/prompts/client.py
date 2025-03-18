@@ -7,6 +7,8 @@ from ..types.prompt_page_public import PromptPagePublic
 from ..core.pydantic_utilities import parse_obj_as
 from json.decoder import JSONDecodeError
 from ..core.api_error import ApiError
+from ..types.json_node_write import JsonNodeWrite
+from .types.prompt_write_type import PromptWriteType
 from ..errors.bad_request_error import BadRequestError
 from ..errors.conflict_error import ConflictError
 from ..errors.unprocessable_entity_error import UnprocessableEntityError
@@ -57,7 +59,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.get_prompts()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -91,6 +96,9 @@ class PromptsClient:
         id: typing.Optional[str] = OMIT,
         description: typing.Optional[str] = OMIT,
         template: typing.Optional[str] = OMIT,
+        metadata: typing.Optional[JsonNodeWrite] = OMIT,
+        change_description: typing.Optional[str] = OMIT,
+        type: typing.Optional[PromptWriteType] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -106,6 +114,12 @@ class PromptsClient:
 
         template : typing.Optional[str]
 
+        metadata : typing.Optional[JsonNodeWrite]
+
+        change_description : typing.Optional[str]
+
+        type : typing.Optional[PromptWriteType]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -117,7 +131,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.create_prompt(
             name="name",
         )
@@ -130,6 +147,9 @@ class PromptsClient:
                 "name": name,
                 "description": description,
                 "template": template,
+                "metadata": metadata,
+                "change_description": change_description,
+                "type": type,
             },
             headers={
                 "content-type": "application/json",
@@ -203,7 +223,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi, PromptVersionDetail
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.create_prompt_version(
             name="name",
             version=PromptVersionDetail(
@@ -292,7 +315,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.get_prompt_by_id(
             id="id",
         )
@@ -356,7 +382,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.update_prompt(
             id="id",
             name="name",
@@ -444,7 +473,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.delete_prompt(
             id="id",
         )
@@ -486,7 +518,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.delete_prompts_batch(
             ids=["ids"],
         )
@@ -533,7 +568,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.get_prompt_version_by_id(
             version_id="versionId",
         )
@@ -598,7 +636,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.get_prompt_versions(
             id="id",
         )
@@ -654,7 +695,10 @@ class PromptsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.prompts.retrieve_prompt_version(
             name="name",
         )
@@ -754,7 +798,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -794,6 +841,9 @@ class AsyncPromptsClient:
         id: typing.Optional[str] = OMIT,
         description: typing.Optional[str] = OMIT,
         template: typing.Optional[str] = OMIT,
+        metadata: typing.Optional[JsonNodeWrite] = OMIT,
+        change_description: typing.Optional[str] = OMIT,
+        type: typing.Optional[PromptWriteType] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -809,6 +859,12 @@ class AsyncPromptsClient:
 
         template : typing.Optional[str]
 
+        metadata : typing.Optional[JsonNodeWrite]
+
+        change_description : typing.Optional[str]
+
+        type : typing.Optional[PromptWriteType]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -822,7 +878,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -841,6 +900,9 @@ class AsyncPromptsClient:
                 "name": name,
                 "description": description,
                 "template": template,
+                "metadata": metadata,
+                "change_description": change_description,
+                "type": type,
             },
             headers={
                 "content-type": "application/json",
@@ -916,7 +978,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi, PromptVersionDetail
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1013,7 +1078,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1085,7 +1153,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1181,7 +1252,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1231,7 +1305,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1286,7 +1363,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1359,7 +1439,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1423,7 +1506,10 @@ class AsyncPromptsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:

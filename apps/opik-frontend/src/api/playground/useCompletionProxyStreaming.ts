@@ -1,36 +1,66 @@
-import { useCallback, useRef } from "react";
-
+import { useCallback } from "react";
 import dayjs from "dayjs";
+import isObject from "lodash/isObject";
+
 import { UsageType } from "@/types/shared";
 import {
-  PlaygroundPromptConfigsType,
-  ProviderMessageType,
   ChatCompletionMessageChoiceType,
   ChatCompletionResponse,
-  ChatCompletionErrorMessageType,
+  ChatCompletionProviderErrorMessageType,
   ChatCompletionSuccessMessageType,
-  ChatCompletionProxyErrorMessageType,
+  ChatCompletionOpikErrorMessageType,
+  ChatCompletionPythonProxyErrorMessageType,
 } from "@/types/playground";
-import { safelyParseJSON, snakeCaseObj } from "@/lib/utils";
+import { isValidJsonObject, safelyParseJSON, snakeCaseObj } from "@/lib/utils";
 import { BASE_API_URL } from "@/api/api";
-import { PROVIDER_MODEL_TYPE } from "@/types/providers";
+import { LLMPromptConfigsType, PROVIDER_MODEL_TYPE } from "@/types/providers";
+import { ProviderMessageType } from "@/types/llm";
+
+const DATA_PREFIX = "data:";
+
+const getNowUtcTimeISOString = (): string => {
+  return dayjs().utc().toISOString();
+};
 
 interface GetCompletionProxyStreamParams {
+  url?: string;
   model: PROVIDER_MODEL_TYPE | "";
   messages: ProviderMessageType[];
   signal: AbortSignal;
-  configs: PlaygroundPromptConfigsType;
+  configs: LLMPromptConfigsType;
   workspaceName: string;
 }
 
+const isPythonProxyError = (
+  response: ChatCompletionResponse,
+): response is ChatCompletionPythonProxyErrorMessageType => {
+  return "detail" in response;
+};
+
+const isOpikError = (
+  response: ChatCompletionResponse,
+): response is ChatCompletionOpikErrorMessageType => {
+  return (
+    "errors" in response ||
+    ("code" in response && !isValidJsonObject(response.message))
+  );
+};
+
+const isProviderError = (
+  response: ChatCompletionResponse,
+): response is ChatCompletionProviderErrorMessageType => {
+  return "code" in response && isValidJsonObject(response.message);
+};
+
 const getCompletionProxyStream = async ({
+  url = `${BASE_API_URL}/v1/private/chat/completions`,
   model,
   messages,
   signal,
   configs,
   workspaceName,
 }: GetCompletionProxyStreamParams) => {
-  return fetch(`${BASE_API_URL}/v1/private/chat/completions`, {
+  return fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -48,148 +78,178 @@ const getCompletionProxyStream = async ({
   });
 };
 
+export interface RunStreamingArgs {
+  url?: string;
+  model: PROVIDER_MODEL_TYPE | "";
+  messages: ProviderMessageType[];
+  configs: LLMPromptConfigsType;
+  onAddChunk: (accumulatedValue: string) => void;
+  signal: AbortSignal;
+}
+
 export interface RunStreamingReturn {
   result: null | string;
   startTime: string;
   endTime: string;
   usage: UsageType | null;
   choices: ChatCompletionMessageChoiceType[] | null;
-  platformError: null | string;
-  proxyError: null | string;
+  providerError: null | string;
+  opikError: null | string;
+  pythonProxyError: null | string;
 }
 
 interface UseCompletionProxyStreamingParameters {
-  model: PROVIDER_MODEL_TYPE | "";
-  messages: ProviderMessageType[];
-  onAddChunk: (accumulatedValue: string) => void;
-  configs: PlaygroundPromptConfigsType;
   workspaceName: string;
 }
 
 const useCompletionProxyStreaming = ({
-  model,
-  messages,
-  configs,
-  onAddChunk,
   workspaceName,
 }: UseCompletionProxyStreamingParameters) => {
-  const abortControllerRef = useRef<AbortController | null>(null);
+  return useCallback(
+    async ({
+      url,
+      model,
+      messages,
+      configs,
+      onAddChunk,
+      signal,
+    }: RunStreamingArgs): Promise<RunStreamingReturn> => {
+      const startTime = getNowUtcTimeISOString();
 
-  const stop = useCallback(() => {
-    abortControllerRef.current?.abort();
-    abortControllerRef.current = null;
-  }, []);
+      let accumulatedValue = "";
+      let usage = null;
+      let choices: ChatCompletionMessageChoiceType[] = [];
 
-  const runStreaming = useCallback(async (): Promise<RunStreamingReturn> => {
-    const startTime = dayjs().utc().toISOString();
+      // errors
+      let pythonProxyError = null;
+      let opikError = null;
+      let providerError = null;
 
-    let accumulatedValue = "";
-    let usage = null;
-    let choices: ChatCompletionMessageChoiceType[] = [];
+      try {
+        const response = await getCompletionProxyStream({
+          url,
+          model,
+          messages,
+          configs,
+          signal,
+          workspaceName,
+        });
 
-    // errors
-    let proxyError = null;
-    let platformError = null;
+        const reader = response?.body?.getReader();
+        const decoder = new TextDecoder("utf-8");
 
-    try {
-      abortControllerRef.current = new AbortController();
+        const handleSuccessMessage = (
+          parsed: ChatCompletionSuccessMessageType,
+        ) => {
+          choices = parsed?.choices;
+          const deltaContent = choices?.[0]?.delta?.content;
 
-      const response = await getCompletionProxyStream({
-        model,
-        messages,
-        configs,
-        signal: abortControllerRef.current?.signal,
-        workspaceName,
-      });
+          if (parsed?.usage) {
+            usage = parsed.usage as UsageType;
+          }
 
-      const reader = response?.body?.getReader();
-      const decoder = new TextDecoder("utf-8");
+          if (deltaContent) {
+            accumulatedValue += deltaContent;
+            onAddChunk(accumulatedValue);
+          }
+        };
 
-      const handleSuccessMessage = (
-        parsed: ChatCompletionSuccessMessageType,
-      ) => {
-        choices = parsed?.choices;
-        const deltaContent = choices?.[0]?.delta?.content;
+        const handleAIPlatformErrorMessage = (
+          parsedMessage: ChatCompletionProviderErrorMessageType,
+        ) => {
+          const message = safelyParseJSON(parsedMessage?.message);
 
-        if (parsed?.usage) {
-          usage = parsed.usage as UsageType;
-        }
+          providerError = message?.error?.message;
+        };
 
-        if (deltaContent) {
-          accumulatedValue += deltaContent;
-          onAddChunk(accumulatedValue);
-        }
-      };
+        const handleOpikErrorMessage = (
+          parsedMessage: ChatCompletionOpikErrorMessageType,
+        ) => {
+          if ("code" in parsedMessage && "message" in parsedMessage) {
+            opikError = parsedMessage.message;
+            return;
+          }
 
-      const handleAIPlatformErrorMessage = (
-        parsedMessage: ChatCompletionErrorMessageType,
-      ) => {
-        const message = safelyParseJSON(parsedMessage?.message);
+          opikError = parsedMessage.errors.join(" ");
+        };
 
-        platformError = message?.error?.message;
-      };
-
-      const handleProxyErrorMessage = (
-        parsedMessage: ChatCompletionProxyErrorMessageType,
-      ) => {
-        proxyError = parsedMessage.errors.join(" ");
-      };
-
-      // an analogue of true && reader
-      // we need it to wait till the stream is closed
-      while (reader) {
-        const { done, value } = await reader.read();
-
-        if (done || proxyError || platformError) {
-          break;
-        }
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n").filter((line) => line.trim() !== "");
-
-        for (const line of lines) {
-          const parsed = safelyParseJSON(line) as ChatCompletionResponse;
-
-          // handle different message types
-          if ("errors" in parsed) {
-            handleProxyErrorMessage(parsed);
-          } else if ("code" in parsed) {
-            handleAIPlatformErrorMessage(parsed);
+        const handlePythonProxyErrorMessage = (
+          parsedMessage: ChatCompletionPythonProxyErrorMessageType,
+        ) => {
+          if (
+            isObject(parsedMessage.detail) &&
+            "error" in parsedMessage.detail
+          ) {
+            pythonProxyError = parsedMessage.detail.error;
           } else {
-            handleSuccessMessage(parsed);
+            pythonProxyError = parsedMessage.detail ?? "Python proxy error";
+          }
+        };
+
+        // an analogue of true && reader
+        // we need it to wait till the stream is closed
+        while (reader) {
+          const { done, value } = await reader.read();
+
+          if (done || opikError || pythonProxyError || providerError) {
+            break;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split("\n").filter((line) => line.trim() !== "");
+
+          for (const line of lines) {
+            const JSONData = line.startsWith(DATA_PREFIX)
+              ? line.split(DATA_PREFIX)[1]
+              : line;
+
+            const parsed = safelyParseJSON(JSONData) as ChatCompletionResponse;
+
+            // handle different message types
+            if (isPythonProxyError(parsed)) {
+              handlePythonProxyErrorMessage(parsed);
+            } else if (isOpikError(parsed)) {
+              handleOpikErrorMessage(parsed);
+            } else if (isProviderError(parsed)) {
+              handleAIPlatformErrorMessage(parsed);
+            } else {
+              handleSuccessMessage(parsed);
+            }
           }
         }
+
+        return {
+          startTime,
+          endTime: getNowUtcTimeISOString(),
+          result: accumulatedValue,
+          providerError,
+          opikError,
+          pythonProxyError,
+          usage,
+          choices,
+        };
+        //   abort signal also jumps into here
+      } catch (error) {
+        const typedError = error as Error;
+        const isStopped = typedError.name === "AbortError";
+
+        // no error if a run has been stopped
+        const defaultErrorMessage = isStopped ? null : "Unexpected error";
+
+        return {
+          startTime,
+          endTime: getNowUtcTimeISOString(),
+          result: accumulatedValue,
+          providerError,
+          opikError: opikError || defaultErrorMessage,
+          pythonProxyError,
+          usage: null,
+          choices,
+        };
       }
-      return {
-        startTime,
-        endTime: dayjs().utc().toISOString(),
-        result: accumulatedValue,
-        platformError,
-        proxyError,
-        usage,
-        choices,
-      };
-      //   abort signal also jumps into here
-    } catch (error) {
-      const typedError = error as Error;
-      const isStopped = typedError.name === "AbortError";
-
-      // no error if a run has been stopped
-      const defaultErrorMessage = isStopped ? null : "Unexpected error";
-
-      return {
-        startTime,
-        endTime: dayjs().utc().toISOString(),
-        result: accumulatedValue,
-        platformError,
-        proxyError: proxyError || defaultErrorMessage,
-        usage: null,
-        choices,
-      };
-    }
-  }, [messages, model, onAddChunk, configs, workspaceName]);
-
-  return { runStreaming, stop };
+    },
+    [workspaceName],
+  );
 };
 
 export default useCompletionProxyStreaming;

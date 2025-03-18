@@ -1,5 +1,4 @@
 import React, { useMemo, useRef, useState } from "react";
-import { keepPreviousData } from "@tanstack/react-query";
 import { ColumnPinningState } from "@tanstack/react-table";
 
 import { convertColumnDataToColumn } from "@/lib/table";
@@ -58,12 +57,16 @@ const AIProvidersTab = () => {
       workspaceName,
     },
     {
-      placeholderData: keepPreviousData,
       refetchInterval: 30000,
     },
   );
 
   const providerKeys = useMemo(() => data?.content ?? [], [data?.content]);
+
+  const configuredProviderKeys = useMemo(
+    () => providerKeys.map((p) => p.provider),
+    [providerKeys],
+  );
 
   const filteredProviderKeys = useMemo(() => {
     if (providerKeys?.length === 0 || search === "") {
@@ -117,9 +120,11 @@ const AIProvidersTab = () => {
             setSearchText={setSearch}
             className="w-[320px]"
             placeholder="Search by name"
+            dimension="sm"
           />
           <Button
             onClick={handleAddConfigurationClick}
+            size="sm"
             disabled={areAllProvidersConfigured(providerKeys)}
           >
             Add configuration
@@ -142,6 +147,7 @@ const AIProvidersTab = () => {
         />
       </div>
       <AddEditAIProviderDialog
+        excludedProviders={configuredProviderKeys}
         key={resetDialogKeyRef.current}
         open={openDialog}
         setOpen={setOpenDialog}

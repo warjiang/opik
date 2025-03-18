@@ -1,6 +1,7 @@
 import React, { MouseEventHandler, useState } from "react";
 import isNumber from "lodash/isNumber";
 import { Link, useMatchRoute } from "@tanstack/react-router";
+
 import {
   Book,
   Database,
@@ -14,6 +15,7 @@ import {
   LucideHome,
   Blocks,
   Bolt,
+  Brain,
 } from "lucide-react";
 import { keepPreviousData } from "@tanstack/react-query";
 
@@ -21,6 +23,7 @@ import useAppStore from "@/store/AppStore";
 import useProjectsList from "@/api/projects/useProjectsList";
 import useDatasetsList from "@/api/datasets/useDatasetsList";
 import useExperimentsList from "@/api/datasets/useExperimentsList";
+import useRulesList from "@/api/automations/useRulesList";
 import { OnChangeFn } from "@/types/shared";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -30,6 +33,8 @@ import Logo from "@/components/layout/Logo/Logo";
 import usePluginsStore from "@/store/PluginsStore";
 import ProvideFeedbackDialog from "@/components/layout/SideBar/FeedbackDialog/ProvideFeedbackDialog";
 import usePromptsList from "@/api/prompts/usePromptsList";
+import QuickstartDialog from "@/components/pages-shared/onboarding/QuickstartDialog/QuickstartDialog";
+import GitHubStarListItem from "@/components/layout/SideBar/GitHubStarListItem/GitHubStarListItem";
 
 enum MENU_ITEM_TYPE {
   link = "link",
@@ -126,6 +131,20 @@ const MENU_ITEMS: MenuItemGroup[] = [
     ],
   },
   {
+    id: "production",
+    label: "Production",
+    items: [
+      {
+        id: "online_evaluation",
+        path: "/$workspaceName/online-evaluation",
+        type: MENU_ITEM_TYPE.router,
+        icon: Brain,
+        label: "Online evaluation",
+        count: "rules",
+      },
+    ],
+  },
+  {
     id: "configuration",
     label: "Configuration",
     items: [
@@ -208,6 +227,7 @@ const SideBar: React.FunctionComponent<SideBarProps> = ({
   setExpanded,
 }) => {
   const [openProvideFeedback, setOpenProvideFeedback] = useState(false);
+  const [openQuickstart, setOpenQuickstart] = useState(false);
 
   const matchRoute = useMatchRoute();
   const workspaceName = useAppStore((state) => state.activeWorkspaceName);
@@ -264,11 +284,24 @@ const SideBar: React.FunctionComponent<SideBarProps> = ({
     },
   );
 
+  const { data: rulesData } = useRulesList(
+    {
+      workspaceName,
+      page: 1,
+      size: 1,
+    },
+    {
+      placeholderData: keepPreviousData,
+      enabled: expanded,
+    },
+  );
+
   const countDataMap: Record<string, number | undefined> = {
     projects: projectData?.total,
     datasets: datasetsData?.total,
     experiments: experimentsData?.total,
     prompts: promptsData?.total,
+    rules: rulesData?.total,
   };
 
   const bottomMenuItems: MenuItem[] = [
@@ -281,10 +314,10 @@ const SideBar: React.FunctionComponent<SideBarProps> = ({
     },
     {
       id: "quickstart",
-      path: "/$workspaceName/quickstart",
-      type: MENU_ITEM_TYPE.router,
+      type: MENU_ITEM_TYPE.button,
       icon: GraduationCap,
       label: "Quickstart guide",
+      onClick: () => setOpenQuickstart(true),
     },
     {
       id: "provideFeedback",
@@ -400,11 +433,12 @@ const SideBar: React.FunctionComponent<SideBarProps> = ({
             </Button>
           )}
         </div>
-        <div className="flex h-[calc(100%-var(--header-height))] flex-col justify-between px-3 py-6">
+        <div className="flex h-[calc(100%-var(--header-height))] flex-col justify-between px-3 py-4">
           <ul className="flex flex-col gap-1">{renderGroups(MENU_ITEMS)}</ul>
           <div className="flex flex-col gap-4">
             <Separator />
             <ul className="flex flex-col gap-1">
+              <GitHubStarListItem expanded={expanded} />
               {renderItems(bottomMenuItems)}
             </ul>
           </div>
@@ -415,6 +449,8 @@ const SideBar: React.FunctionComponent<SideBarProps> = ({
         open={openProvideFeedback}
         setOpen={setOpenProvideFeedback}
       />
+
+      <QuickstartDialog open={openQuickstart} setOpen={setOpenQuickstart} />
     </>
   );
 };

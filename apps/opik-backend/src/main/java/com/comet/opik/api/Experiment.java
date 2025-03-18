@@ -26,6 +26,8 @@ public record Experiment(
         @JsonView({Experiment.View.Public.class, Experiment.View.Write.class}) JsonNode metadata,
         @JsonView({
                 Experiment.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) List<FeedbackScoreAverage> feedbackScores,
+        @JsonView({
+                Experiment.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) List<Comment> comments,
         @JsonView({Experiment.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) Long traceCount,
         @JsonView({Experiment.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) Instant createdAt,
         @JsonView({
@@ -33,7 +35,9 @@ public record Experiment(
         @JsonView({Experiment.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) String createdBy,
         @JsonView({
                 Experiment.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) String lastUpdatedBy,
-        @JsonView({Experiment.View.Public.class, Experiment.View.Write.class}) PromptVersionLink promptVersion){
+        @JsonView({Experiment.View.Public.class,
+                Experiment.View.Write.class}) @Schema(deprecated = true) PromptVersionLink promptVersion,
+        @JsonView({Experiment.View.Public.class, Experiment.View.Write.class}) List<PromptVersionLink> promptVersions){
 
     @Builder(toBuilder = true)
     public record ExperimentPage(

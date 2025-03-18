@@ -1,37 +1,42 @@
+import enum
 import sys
-
 from typing import Literal, Optional
+
 from typing_extensions import TypedDict
 
 if sys.version_info < (3, 11):
-    from typing_extensions import Required, NotRequired
+    from typing_extensions import NotRequired, Required
 else:
-    from typing import Required, NotRequired
+    from typing import NotRequired, Required
 
 SpanType = Literal["general", "tool", "llm"]
 FeedbackType = Literal["numerical", "categorical"]
 CreatedByType = Literal["evaluation"]
 
 
-class UsageDict(TypedDict):
-    """
-    A TypedDict representing token usage information.
+class LLMProvider(str, enum.Enum):
+    GOOGLE_VERTEXAI = "google_vertexai"
+    """Used for gemini models hosted in VertexAI. https://cloud.google.com/vertex-ai"""
 
-    This class defines the structure for token usage, including fields
-    for completion tokens, prompt tokens, and the total number of tokens used.
-    """
+    GOOGLE_AI = "google_ai"
+    """Used for gemini models hosted in GoogleAI. https://ai.google.dev/aistudio"""
 
-    completion_tokens: int
-    """The number of tokens used for the completion."""
+    OPENAI = "openai"
+    """Used for models hosted by OpenAI. https://platform.openai.com"""
 
-    prompt_tokens: int
-    """The number of tokens used for the prompt."""
+    ANTHROPIC = "anthropic"
+    """Used for models hosted by Anthropic. https://www.anthropic.com"""
 
-    total_tokens: int
-    """The total number of tokens used, including both prompt and completion."""
+    @classmethod
+    def has_value(cls, value: str) -> bool:
+        return value in [enum_item.value for enum_item in cls]
 
 
 class DistributedTraceHeadersDict(TypedDict):
+    """
+    Contains headers for distributed tracing, returned by the :py:func:`opik.opik_context.get_distributed_trace_headers` function.
+    """
+
     opik_trace_id: str
     opik_parent_span_id: str
 
@@ -66,7 +71,7 @@ class FeedbackScoreDict(TypedDict):
 
 class ErrorInfoDict(TypedDict):
     """
-    A TypedDict representing the information about the error occured.
+    A TypedDict representing the information about the error occurred.
     """
 
     exception_type: str

@@ -5,6 +5,7 @@ import com.comet.opik.api.Project;
 import com.comet.opik.api.Project.ProjectPage;
 import com.comet.opik.api.ProjectCriteria;
 import com.comet.opik.api.ProjectIdLastUpdated;
+import com.comet.opik.api.ProjectStatsSummary;
 import com.comet.opik.api.ProjectUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
 import com.comet.opik.api.error.ErrorMessage;
@@ -13,6 +14,7 @@ import com.comet.opik.api.sorting.SortableFields;
 import com.comet.opik.api.sorting.SortingFactoryProjects;
 import com.comet.opik.api.sorting.SortingField;
 import com.comet.opik.domain.sorting.SortingQueryBuilder;
+import com.comet.opik.domain.stats.StatsMapper;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.infrastructure.db.TransactionTemplateAsync;
 import com.comet.opik.utils.PaginationUtils;
@@ -25,6 +27,7 @@ import jakarta.ws.rs.core.Response;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.collections4.CollectionUtils;
 import org.jdbi.v3.core.statement.UnableToExecuteStatementException;
 import ru.vyarus.guicey.jdbi3.tx.TransactionTemplate;
 
@@ -41,9 +44,12 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static com.comet.opik.api.ProjectStats.ProjectStatItem;
+import static com.comet.opik.api.ProjectStatsSummary.ProjectStatsSummaryItem;
 import static com.comet.opik.infrastructure.db.TransactionTemplateAsync.READ_ONLY;
 import static com.comet.opik.infrastructure.db.TransactionTemplateAsync.WRITE;
 import static java.util.Collections.reverseOrder;
+import static java.util.stream.Collectors.toMap;
 import static java.util.stream.Collectors.toSet;
 import static java.util.stream.Collectors.toUnmodifiableSet;
 
@@ -78,6 +84,9 @@ public interface ProjectService {
     Project retrieveByName(String projectName);
 
     void recordLastUpdatedTrace(String workspaceId, Collection<ProjectIdLastUpdated> lastUpdatedTraces);
+
+    ProjectStatsSummary getStats(int page, int size, @NonNull ProjectCriteria criteria,
+            @NonNull List<SortingField> sortingFields);
 }
 
 @Slf4j
@@ -200,7 +209,40 @@ class ProjectServiceImpl implements ProjectService {
                 .block();
 
         return project.toBuilder()
-                .lastUpdatedTraceAt(lastUpdatedTraceAt.get(id))
+                .lastUpdatedTraceAt(lastUpdatedTraceAt.get(project.id()))
+                .build();
+    }
+
+    @Override
+    public ProjectStatsSummary getStats(int page, int size, @NonNull ProjectCriteria criteria,
+            @NonNull List<SortingField> sortingFields) {
+
+        String workspaceId = requestContext.get().getWorkspaceId();
+
+        List<UUID> projectIds = find(page, size, criteria, sortingFields)
+                .content()
+                .stream()
+                .map(Project::id)
+                .toList();
+
+        Map<UUID, Map<String, Object>> projectStats = getProjectStats(projectIds, workspaceId);
+
+        return ProjectStatsSummary.builder()
+                .content(
+                        projectIds.stream()
+                                .map(projectId -> getStats(projectId, projectStats.get(projectId)))
+                                .toList())
+                .build();
+    }
+
+    private ProjectStatsSummaryItem getStats(UUID projectId, Map<String, Object> projectStats) {
+        return ProjectStatsSummaryItem.builder()
+                .projectId(projectId)
+                .feedbackScores(StatsMapper.getStatsFeedbackScores(projectStats))
+                .duration(StatsMapper.getStatsDuration(projectStats))
+                .totalEstimatedCost(StatsMapper.getStatsTotalEstimatedCost(projectStats))
+                .usage(StatsMapper.getStatsUsage(projectStats))
+                .traceCount(StatsMapper.getStatsTraceCount(projectStats))
                 .build();
     }
 
@@ -273,13 +315,30 @@ class ProjectServiceImpl implements ProjectService {
 
         List<Project> projects = projectRecordSet.content()
                 .stream()
-                .map(project -> project.toBuilder()
-                        .lastUpdatedTraceAt(projectLastUpdatedTraceAtMap.get(project.id()))
-                        .build())
+                .map(project -> {
+                    Instant lastUpdatedTraceAt = projectLastUpdatedTraceAtMap.get(project.id());
+                    return project.toBuilder()
+                            .lastUpdatedTraceAt(lastUpdatedTraceAt)
+                            .build();
+                })
                 .toList();
 
         return new ProjectPage(page, projects.size(), projectRecordSet.total(), projects,
                 sortingFactory.getSortableFields());
+    }
+
+    private Map<UUID, Map<String, Object>> getProjectStats(List<UUID> projectIds, String workspaceId) {
+        return traceDAO.getStatsByProjectIds(projectIds, workspaceId)
+                .map(stats -> stats.entrySet().stream()
+                        .map(entry -> {
+                            Map<String, Object> statsMap = entry.getValue().stats()
+                                    .stream()
+                                    .collect(toMap(ProjectStatItem::getName, ProjectStatItem::getValue));
+
+                            return Map.entry(entry.getKey(), statsMap);
+                        })
+                        .collect(toMap(Map.Entry::getKey, Map.Entry::getValue)))
+                .block();
     }
 
     @Override
@@ -310,9 +369,11 @@ class ProjectServiceImpl implements ProjectService {
         // get last trace for each project id
         Set<UUID> allProjectIds = allProjectIdsLastUpdated.stream().map(ProjectIdLastUpdated::id)
                 .collect(toUnmodifiableSet());
+
         Map<UUID, Instant> projectLastUpdatedTraceAtMap = transactionTemplateAsync
                 .nonTransaction(connection -> traceDAO.getLastUpdatedTraceAt(allProjectIds, workspaceId, connection))
                 .block();
+
         if (projectLastUpdatedTraceAtMap == null) {
             return ProjectPage.empty(page);
         }
@@ -320,6 +381,11 @@ class ProjectServiceImpl implements ProjectService {
         // sort and paginate
         List<UUID> sorted = sortByLastTrace(allProjectIdsLastUpdated, projectLastUpdatedTraceAtMap, sortingField);
         List<UUID> finalIds = PaginationUtils.paginate(page, size, sorted);
+
+        if (CollectionUtils.isEmpty(finalIds)) {
+            // pagination might return an empty list
+            return ProjectPage.empty(page);
+        }
 
         // get all project properties for the final list of ids
         Map<UUID, Project> projectsById = template.inTransaction(READ_ONLY, handle -> {
@@ -329,9 +395,11 @@ class ProjectServiceImpl implements ProjectService {
         }).stream().collect(Collectors.toMap(Project::id, Function.identity()));
 
         // compose the final projects list by the correct order and add last trace to it
-        List<Project> projects = finalIds.stream().map(id -> projectsById.get(id).toBuilder()
-                .lastUpdatedTraceAt(projectLastUpdatedTraceAtMap.get(id))
-                .build())
+        List<Project> projects = finalIds.stream()
+                .map(projectsById::get)
+                .map(project -> project.toBuilder()
+                        .lastUpdatedTraceAt(projectLastUpdatedTraceAtMap.get(project.id()))
+                        .build())
                 .toList();
 
         return new ProjectPage(page, projects.size(), allProjectIdsLastUpdated.size(), projects,
@@ -350,7 +418,9 @@ class ProjectServiceImpl implements ProjectService {
                 ? reverseOrder(Map.Entry.comparingByValue())
                 : Map.Entry.comparingByValue();
 
-        return projectLastUpdatedTraceAtMap.entrySet().stream().sorted(comparator)
+        return projectLastUpdatedTraceAtMap.entrySet()
+                .stream()
+                .sorted(comparator)
                 .map(Map.Entry::getKey)
                 .toList();
     }
@@ -403,6 +473,27 @@ class ProjectServiceImpl implements ProjectService {
             return repository.findByNames(workspaceId, List.of(projectName))
                     .stream()
                     .findFirst()
+                    .map(project -> {
+
+                        Map<UUID, Instant> projectLastUpdatedTraceAtMap = transactionTemplateAsync
+                                .nonTransaction(connection -> {
+                                    Set<UUID> projectIds = Set.of(project.id());
+                                    return traceDAO.getLastUpdatedTraceAt(projectIds, workspaceId, connection);
+                                }).block();
+
+                        Map<UUID, Map<String, Object>> projectStats = getProjectStats(List.of(project.id()),
+                                workspaceId);
+
+                        return project.toBuilder()
+                                .lastUpdatedTraceAt(projectLastUpdatedTraceAtMap.get(project.id()))
+                                .feedbackScores(StatsMapper.getStatsFeedbackScores(projectStats.get(project.id())))
+                                .usage(StatsMapper.getStatsUsage(projectStats.get(project.id())))
+                                .duration(StatsMapper.getStatsDuration(projectStats.get(project.id())))
+                                .totalEstimatedCost(
+                                        StatsMapper.getStatsTotalEstimatedCost(projectStats.get(project.id())))
+                                .traceCount(StatsMapper.getStatsTraceCount(projectStats.get(project.id())))
+                                .build();
+                    })
                     .orElseThrow(this::createNotFoundError);
         });
     }

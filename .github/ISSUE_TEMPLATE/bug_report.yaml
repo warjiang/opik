@@ -39,5 +39,14 @@ body:
       required: true
   - type: textarea
     attributes:
-      label: Reproduction steps
+      label: Reproduction steps and code snippets
       description: Describe how to reproduce your bug. Please provide detailed steps and include code snippets if possible.
+  - type: textarea
+    attributes:
+      label: Error logs or stack trace
+      description: Please provide the error messages, logs, or stack trace that appear when your bug is reproduced, if possible.
+  - type: textarea
+    attributes:
+      label: Healthcheck results
+      description: Run `opik healthcheck` to perform some basic checks which might be useful for troubleshooting your issue. Paste your results as a text or a screenshot.
+      placeholder: CLI output from 'opik healthcheck'...

@@ -1,12 +1,24 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { keepPreviousData } from "@tanstack/react-query";
+import {
+  JsonParam,
+  NumberParam,
+  StringParam,
+  useQueryParam,
+} from "use-query-params";
+import isNumber from "lodash/isNumber";
+import get from "lodash/get";
+
+import { formatNumericData } from "@/lib/utils";
 import DataTable from "@/components/shared/DataTable/DataTable";
 import DataTableNoData from "@/components/shared/DataTableNoData/DataTableNoData";
 import DataTablePagination from "@/components/shared/DataTablePagination/DataTablePagination";
 import IdCell from "@/components/shared/DataTableCells/IdCell";
+import DurationCell from "@/components/shared/DataTableCells/DurationCell";
+import CostCell from "@/components/shared/DataTableCells/CostCell";
 import ResourceCell from "@/components/shared/DataTableCells/ResourceCell";
-import useProjectsList from "@/api/projects/useProjectsList";
-import { Project } from "@/types/projects";
+import useProjectWithStatisticsList from "@/hooks/useProjectWithStatisticsList";
+import { ProjectWithStatistic } from "@/types/projects";
 import Loader from "@/components/shared/Loader/Loader";
 import AddEditProjectDialog from "@/components/pages/ProjectsPage/AddEditProjectDialog";
 import ProjectsActionsPanel from "@/components/pages/ProjectsPage/ProjectsActionsPanel";
@@ -25,31 +37,102 @@ import {
 } from "@/types/shared";
 import { convertColumnDataToColumn, mapColumnDataFields } from "@/lib/table";
 import useLocalStorageState from "use-local-storage-state";
-import {
-  ColumnPinningState,
-  ColumnSort,
-  RowSelectionState,
-} from "@tanstack/react-table";
+import { ColumnPinningState, ColumnSort } from "@tanstack/react-table";
 import {
   generateActionsColumDef,
   generateSelectColumDef,
 } from "@/components/shared/DataTable/utils";
 import { RESOURCE_TYPE } from "@/components/shared/ResourceLink/ResourceLink";
+import FeedbackScoreListCell from "@/components/shared/DataTableCells/FeedbackScoreListCell";
 
-export const getRowId = (p: Project) => p.id;
+export const getRowId = (p: ProjectWithStatistic) => p.id;
 
 const SELECTED_COLUMNS_KEY = "projects-selected-columns";
 const COLUMNS_WIDTH_KEY = "projects-columns-width";
 const COLUMNS_ORDER_KEY = "projects-columns-order";
 const COLUMNS_SORT_KEY = "projects-columns-sort";
 
-export const DEFAULT_COLUMNS: ColumnData<Project>[] = [
+export const DEFAULT_COLUMNS: ColumnData<ProjectWithStatistic>[] = [
   {
     id: "id",
     label: "ID",
     type: COLUMN_TYPE.string,
     cell: IdCell as never,
     sortable: true,
+  },
+  {
+    id: "duration.p50",
+    label: "Duration (p50)",
+    type: COLUMN_TYPE.duration,
+    accessorFn: (row) => row.duration?.p50,
+    cell: DurationCell as never,
+  },
+  {
+    id: "duration.p90",
+    label: "Duration (p90)",
+    type: COLUMN_TYPE.duration,
+    accessorFn: (row) => row.duration?.p90,
+    cell: DurationCell as never,
+  },
+  {
+    id: "duration.p99",
+    label: "Duration (p99)",
+    type: COLUMN_TYPE.duration,
+    accessorFn: (row) => row.duration?.p99,
+    cell: DurationCell as never,
+  },
+  {
+    id: "total_estimated_cost",
+    label: "Total cost",
+    type: COLUMN_TYPE.cost,
+    cell: CostCell as never,
+  },
+  {
+    id: "trace_count",
+    label: "Trace count",
+    type: COLUMN_TYPE.number,
+  },
+  {
+    id: "usage.total_tokens",
+    label: "Total tokens (average)",
+    type: COLUMN_TYPE.number,
+    accessorFn: (row) =>
+      row.usage && isNumber(row.usage.total_tokens)
+        ? formatNumericData(row.usage.total_tokens)
+        : "-",
+  },
+  {
+    id: "usage.prompt_tokens",
+    label: "Input tokens (average)",
+    type: COLUMN_TYPE.number,
+    accessorFn: (row) =>
+      row.usage && isNumber(row.usage.prompt_tokens)
+        ? formatNumericData(row.usage.prompt_tokens)
+        : "-",
+  },
+  {
+    id: "usage.completion_tokens",
+    label: "Output tokens (average)",
+    type: COLUMN_TYPE.number,
+    accessorFn: (row) =>
+      row.usage && isNumber(row.usage.completion_tokens)
+        ? formatNumericData(row.usage.completion_tokens)
+        : "-",
+  },
+  {
+    id: "feedback_scores",
+    label: "Feedback scores",
+    type: COLUMN_TYPE.numberDictionary,
+    accessorFn: (row) =>
+      get(row, "feedback_scores", []).map((score) => ({
+        ...score,
+        value: formatNumericData(score.value),
+      })),
+    cell: FeedbackScoreListCell as never,
+    customMeta: {
+      getHoverCardName: (row: ProjectWithStatistic) => row.name,
+      isAverageScores: true,
+    },
   },
   {
     id: "last_updated_at",
@@ -84,6 +167,8 @@ export const DEFAULT_COLUMN_PINNING: ColumnPinningState = {
 };
 
 export const DEFAULT_SELECTED_COLUMNS: string[] = [
+  "total_estimated_cost",
+  "duration.p50",
   "last_updated_at",
   "created_at",
   "description",
@@ -101,12 +186,22 @@ const ProjectsPage: React.FunctionComponent = () => {
 
   const resetDialogKeyRef = useRef(0);
   const [openDialog, setOpenDialog] = useState<boolean>(false);
-
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
-  const [size, setSize] = useState(10);
-
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
+  const [search = "", setSearch] = useQueryParam("search", StringParam, {
+    updateType: "replaceIn",
+  });
+  const [page = 1, setPage] = useQueryParam("page", NumberParam, {
+    updateType: "replaceIn",
+  });
+  const [size = 10, setSize] = useQueryParam("size", NumberParam, {
+    updateType: "replaceIn",
+  });
+  const [rowSelection = {}, setRowSelection] = useQueryParam(
+    "selection",
+    JsonParam,
+    {
+      updateType: "replaceIn",
+    },
+  );
 
   const [sortedColumns, setSortedColumns] = useLocalStorageState<ColumnSort[]>(
     COLUMNS_SORT_KEY,
@@ -115,10 +210,10 @@ const ProjectsPage: React.FunctionComponent = () => {
     },
   );
 
-  const { data, isPending } = useProjectsList(
+  const { data, isPending } = useProjectWithStatisticsList(
     {
       workspaceName,
-      search,
+      search: search!,
       sorting: sortedColumns.map((column) => {
         if (column.id === "last_updated_at") {
           return {
@@ -128,8 +223,8 @@ const ProjectsPage: React.FunctionComponent = () => {
         }
         return column;
       }),
-      page,
-      size,
+      page: page!,
+      size: size!,
     },
     {
       placeholderData: keepPreviousData,
@@ -161,14 +256,14 @@ const ProjectsPage: React.FunctionComponent = () => {
     defaultValue: {},
   });
 
-  const selectedRows: Project[] = useMemo(() => {
+  const selectedRows: ProjectWithStatistic[] = useMemo(() => {
     return projects.filter((row) => rowSelection[row.id]);
   }, [rowSelection, projects]);
 
   const columns = useMemo(() => {
     return [
-      generateSelectColumDef<Project>(),
-      mapColumnDataFields<Project, Project>({
+      generateSelectColumDef<ProjectWithStatistic>(),
+      mapColumnDataFields<ProjectWithStatistic, ProjectWithStatistic>({
         id: COLUMN_NAME_ID,
         label: "Name",
         type: COLUMN_TYPE.string,
@@ -180,10 +275,13 @@ const ProjectsPage: React.FunctionComponent = () => {
           resource: RESOURCE_TYPE.project,
         },
       }),
-      ...convertColumnDataToColumn<Project, Project>(DEFAULT_COLUMNS, {
-        columnsOrder,
-        selectedColumns,
-      }),
+      ...convertColumnDataToColumn<ProjectWithStatistic, ProjectWithStatistic>(
+        DEFAULT_COLUMNS,
+        {
+          columnsOrder,
+          selectedColumns,
+        },
+      ),
       generateActionsColumDef({
         cell: ProjectRowActionsCell,
       }),
@@ -215,14 +313,15 @@ const ProjectsPage: React.FunctionComponent = () => {
       </div>
       <div className="mb-4 flex items-center justify-between gap-8">
         <SearchInput
-          searchText={search}
+          searchText={search!}
           setSearchText={setSearch}
           placeholder="Search by name"
           className="w-[320px]"
+          dimension="sm"
         ></SearchInput>
         <div className="flex items-center gap-2">
           <ProjectsActionsPanel projects={selectedRows} />
-          <Separator orientation="vertical" className="ml-2 mr-2.5 h-6" />
+          <Separator orientation="vertical" className="mx-1 h-4" />
           <ColumnsButton
             columns={DEFAULT_COLUMNS}
             selectedColumns={selectedColumns}
@@ -230,7 +329,7 @@ const ProjectsPage: React.FunctionComponent = () => {
             order={columnsOrder}
             onOrderChange={setColumnsOrder}
           ></ColumnsButton>
-          <Button variant="default" onClick={handleNewProjectClick}>
+          <Button variant="default" size="sm" onClick={handleNewProjectClick}>
             Create new project
           </Button>
         </div>
@@ -262,9 +361,9 @@ const ProjectsPage: React.FunctionComponent = () => {
       />
       <div className="py-4">
         <DataTablePagination
-          page={page}
+          page={page!}
           pageChange={setPage}
-          size={size}
+          size={size!}
           sizeChange={setSize}
           total={total}
         ></DataTablePagination>

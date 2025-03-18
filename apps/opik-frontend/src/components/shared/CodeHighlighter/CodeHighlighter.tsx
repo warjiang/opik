@@ -7,6 +7,7 @@ import { jsonLanguage } from "@codemirror/lang-json";
 import { yamlLanguage } from "@codemirror/lang-yaml";
 import { pythonLanguage } from "@codemirror/lang-python";
 import { useCodemirrorTheme } from "@/hooks/useCodemirrorTheme";
+import { useCodemirrorLineHighlight } from "@/hooks/useCodemirrorLineHighlight";
 import CopyButton from "@/components/shared/CopyButton/CopyButton";
 
 export enum SUPPORTED_LANGUAGE {
@@ -23,21 +24,28 @@ const PLUGINS_MAP: Record<SUPPORTED_LANGUAGE, Extension> = {
 
 type CodeHighlighterProps = {
   data: string;
+  copyData?: string;
   language?: SUPPORTED_LANGUAGE;
+  highlightedLines?: number[];
 };
 
 const CodeHighlighter: React.FunctionComponent<CodeHighlighterProps> = ({
   data,
+  copyData,
   language = SUPPORTED_LANGUAGE.python,
+  highlightedLines,
 }) => {
   const theme = useCodemirrorTheme();
+  const LineHighlightExtension = useCodemirrorLineHighlight({
+    lines: highlightedLines,
+  });
 
   return (
     <div className="relative overflow-hidden rounded-md bg-primary-foreground">
       <div className="absolute right-2 top-0.5 z-10">
         <CopyButton
           message="Successfully copied code"
-          text={data}
+          text={copyData || data}
           tooltipText="Copy code"
         />
       </div>
@@ -49,6 +57,7 @@ const CodeHighlighter: React.FunctionComponent<CodeHighlighterProps> = ({
           EditorView.lineWrapping,
           EditorState.readOnly.of(true),
           EditorView.editable.of(false),
+          LineHighlightExtension,
         ]}
       />
     </div>

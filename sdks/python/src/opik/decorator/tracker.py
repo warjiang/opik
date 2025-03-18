@@ -1,11 +1,8 @@
 import logging
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from typing import List, Any, Dict, Optional, Callable, Tuple, Union
-
-
-from . import inspect_helpers, arguments_helpers
-from ..api_objects import opik_client
-from . import base_track_decorator
+from ..api_objects import opik_client, span
+from . import arguments_helpers, base_track_decorator, inspect_helpers
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +43,10 @@ class OpikTrackDecorator(base_track_decorator.BaseTrackDecorator):
         return result
 
     def _end_span_inputs_preprocessor(
-        self, output: Any, capture_output: bool
+        self,
+        output: Any,
+        capture_output: bool,
+        current_span_data: span.SpanData,
     ) -> arguments_helpers.EndSpanParameters:
         output = output if capture_output else None
 
@@ -57,19 +57,13 @@ class OpikTrackDecorator(base_track_decorator.BaseTrackDecorator):
 
         return result
 
-    def _generators_handler(
+    def _streams_handler(
         self,
         output: Any,
         capture_output: bool,
         generations_aggregator: Optional[Callable[[List[Any]], str]],
-    ) -> Union[
-        base_track_decorator.Generator[Any, None, None],
-        base_track_decorator.AsyncGenerator[Any, None],
-        None,
-    ]:
-        return super()._generators_handler(
-            output, capture_output, generations_aggregator
-        )
+    ) -> Optional[Any]:
+        return super()._streams_handler(output, capture_output, generations_aggregator)
 
 
 def flush_tracker(timeout: Optional[int] = None) -> None:

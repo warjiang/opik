@@ -4,8 +4,6 @@ import com.comet.opik.api.Column;
 import com.comet.opik.api.DatasetItem;
 import com.comet.opik.api.DatasetItemSource;
 import com.comet.opik.api.ExperimentItem;
-import com.comet.opik.api.FeedbackScore;
-import com.comet.opik.api.ScoreSource;
 import com.comet.opik.utils.JsonUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.collect.Sets;
@@ -17,7 +15,6 @@ import org.apache.commons.lang3.StringUtils;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Mono;
 
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collection;
@@ -29,11 +26,15 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static com.comet.opik.api.Column.ColumnType;
+import static com.comet.opik.domain.CommentResultMapper.getComments;
+import static com.comet.opik.domain.FeedbackScoreMapper.getFeedbackScores;
 import static com.comet.opik.utils.ValidationUtils.CLICKHOUSE_FIXED_STRING_UUID_FIELD_NULL_VALUE;
 import static java.util.function.Predicate.not;
 import static java.util.stream.Collectors.toMap;
 
 class DatasetItemResultMapper {
+
+    private static final int COMMENT_INDEX = 11;
 
     private DatasetItemResultMapper() {
     }
@@ -58,6 +59,7 @@ class DatasetItemResultMapper {
                         .lastUpdatedAt(Instant.parse(experimentItem.get(8).toString()))
                         .createdBy(experimentItem.get(9).toString())
                         .lastUpdatedBy(experimentItem.get(10).toString())
+                        .comments(experimentItem.size() > COMMENT_INDEX ? getComments(experimentItem.get(11)) : null)
                         .build())
                 .toList();
 
@@ -71,26 +73,6 @@ class DatasetItemResultMapper {
         return JsonUtils.getJsonNodeFromString(field.toString());
     }
 
-    private static List<FeedbackScore> getFeedbackScores(Object feedbackScoresRaw) {
-        if (feedbackScoresRaw instanceof List[] feedbackScoresArray) {
-            var feedbackScores = Arrays.stream(feedbackScoresArray)
-                    .filter(feedbackScore -> CollectionUtils.isNotEmpty(feedbackScore) &&
-                            !CLICKHOUSE_FIXED_STRING_UUID_FIELD_NULL_VALUE.equals(feedbackScore.getFirst().toString()))
-                    .map(feedbackScore -> FeedbackScore.builder()
-                            .name(feedbackScore.get(1).toString())
-                            .categoryName(Optional.ofNullable(feedbackScore.get(2)).map(Object::toString)
-                                    .filter(StringUtils::isNotEmpty).orElse(null))
-                            .value(new BigDecimal(feedbackScore.get(3).toString()))
-                            .reason(Optional.ofNullable(feedbackScore.get(4)).map(Object::toString)
-                                    .filter(StringUtils::isNotEmpty).orElse(null))
-                            .source(ScoreSource.fromString(feedbackScore.get(5).toString()))
-                            .build())
-                    .toList();
-            return feedbackScores.isEmpty() ? null : feedbackScores;
-        }
-        return null;
-    }
-
     static Map.Entry<Long, Set<Column>> groupResults(Map.Entry<Long, Set<Column>> result1,
             Map.Entry<Long, Set<Column>> result2) {
 
@@ -102,7 +84,7 @@ class DatasetItemResultMapper {
                 .entrySet()
                 .stream()
                 .map(columnArray -> Column.builder().name(columnArray.getKey())
-                        .types(Set.of(mapColumnType(columnArray.getValue())))
+                        .types(Arrays.stream(mapColumnType(columnArray.getValue())).collect(Collectors.toSet()))
                         .filterFieldPrefix(filterField)
                         .build())
                 .collect(Collectors.toSet());
@@ -127,28 +109,9 @@ class DatasetItemResultMapper {
 
             Map<String, JsonNode> data = getData(row);
 
-            JsonNode input = getJsonNode(row, data, "input");
-            JsonNode expectedOutput = getJsonNode(row, data, "expected_output");
-            JsonNode metadata = getJsonNode(row, data, "metadata");
-
-            if (!data.containsKey("input")) {
-                data.put("input", input);
-            }
-
-            if (!data.containsKey("expected_output")) {
-                data.put("expected_output", expectedOutput);
-            }
-
-            if (!data.containsKey("metadata")) {
-                data.put("metadata", metadata);
-            }
-
             return DatasetItem.builder()
                     .id(row.get("id", UUID.class))
-                    .input(input)
                     .data(data)
-                    .expectedOutput(expectedOutput)
-                    .metadata(metadata)
                     .source(DatasetItemSource.fromString(row.get("source", String.class)))
                     .traceId(Optional.ofNullable(row.get("trace_id", String.class))
                             .filter(s -> !s.isBlank())
@@ -176,26 +139,6 @@ class DatasetItemResultMapper {
                 .flatMap(Collection::stream)
                 .map(entry -> Map.entry(entry.getKey(), JsonUtils.getJsonNodeFromString(entry.getValue())))
                 .collect(toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
-
-    private static JsonNode getJsonNode(Row row, Map<String, JsonNode> data, String key) {
-        JsonNode json = null;
-
-        if (data.containsKey(key)) {
-            json = data.get(key);
-        }
-
-        if (json == null) {
-            json = Optional.ofNullable(row.get(key, String.class))
-                    .filter(s -> !s.isBlank())
-                    .map(JsonUtils::getJsonNodeFromString).orElse(null);
-        }
-
-        return json;
-    }
-
-    static String getOrDefault(JsonNode jsonNode) {
-        return Optional.ofNullable(jsonNode).map(JsonNode::toString).orElse("");
     }
 
     static Map<String, String> getOrDefault(Map<String, JsonNode> data) {

@@ -2,12 +2,15 @@ package com.comet.opik.domain;
 
 import com.clickhouse.client.ClickHouseException;
 import com.comet.opik.api.BiInformationResponse;
+import com.comet.opik.api.DeleteTraceThreads;
 import com.comet.opik.api.Project;
 import com.comet.opik.api.ProjectStats;
 import com.comet.opik.api.Trace;
 import com.comet.opik.api.TraceBatch;
 import com.comet.opik.api.TraceCountResponse;
+import com.comet.opik.api.TraceDetails;
 import com.comet.opik.api.TraceSearchCriteria;
+import com.comet.opik.api.TraceThread;
 import com.comet.opik.api.TraceUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
 import com.comet.opik.api.error.ErrorMessage;
@@ -18,6 +21,7 @@ import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.infrastructure.db.TransactionTemplateAsync;
 import com.comet.opik.infrastructure.lock.LockService;
 import com.comet.opik.utils.AsyncUtils;
+import com.comet.opik.utils.BinaryOperatorUtils;
 import com.comet.opik.utils.WorkspaceUtils;
 import com.google.common.base.Preconditions;
 import com.google.common.eventbus.EventBus;
@@ -25,12 +29,12 @@ import com.google.inject.ImplementedBy;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
-import jakarta.ws.rs.NotFoundException;
-import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.ClientErrorException;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.http.HttpStatus;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -39,14 +43,20 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static com.comet.opik.api.Trace.TracePage;
+import static com.comet.opik.api.TraceThread.TraceThreadPage;
 import static com.comet.opik.domain.FeedbackScoreDAO.EntityType;
+import static com.comet.opik.utils.ErrorUtils.failWithNotFound;
 
 @ImplementedBy(TraceServiceImpl.class)
 public interface TraceService {
+
+    String PROJECT_NAME_AND_WORKSPACE_NAME_MISMATCH = "Project name and workspace name do not match the existing trace";
 
     Mono<UUID> create(Trace trace);
 
@@ -56,11 +66,13 @@ public interface TraceService {
 
     Mono<Trace> get(UUID id);
 
+    Mono<TraceDetails> getTraceDetailsById(UUID id);
+
     Mono<Void> delete(UUID id);
 
     Mono<Void> delete(Set<UUID> ids);
 
-    Mono<Trace.TracePage> find(int page, int size, TraceSearchCriteria criteria);
+    Mono<TracePage> find(int page, int size, TraceSearchCriteria criteria);
 
     Mono<Boolean> validateTraceWorkspace(String workspaceId, Set<UUID> traceIds);
 
@@ -73,6 +85,13 @@ public interface TraceService {
     Mono<Long> getDailyCreatedCount();
 
     Mono<Map<UUID, Instant>> getLastUpdatedTraceAt(Set<UUID> projectIds, String workspaceId);
+
+    Mono<TraceThreadPage> getTraceThreads(int page, int size, TraceSearchCriteria criteria);
+
+    Mono<Void> deleteTraceThreads(DeleteTraceThreads traceThreads);
+
+    Mono<TraceThread> getThreadById(UUID projectId, String threadId);
+
 }
 
 @Slf4j
@@ -80,12 +99,12 @@ public interface TraceService {
 @RequiredArgsConstructor(onConstructor_ = @Inject)
 class TraceServiceImpl implements TraceService {
 
-    public static final String PROJECT_NAME_AND_WORKSPACE_NAME_MISMATCH = "Project name and workspace name do not match the existing trace";
     public static final String TRACE_KEY = "Trace";
 
     private final @NonNull TraceDAO dao;
-    private final @NonNull SpanDAO spanDAO;
+    private final @NonNull SpanService spanService;
     private final @NonNull FeedbackScoreDAO feedbackScoreDAO;
+    private final @NonNull CommentDAO commentDAO;
     private final @NonNull TransactionTemplateAsync template;
     private final @NonNull ProjectService projectService;
     private final @NonNull IdGenerator idGenerator;
@@ -105,10 +124,13 @@ class TraceServiceImpl implements TraceService {
                 .flatMap(project -> lockService.executeWithLock(
                         new LockService.Lock(id, TRACE_KEY),
                         Mono.defer(() -> insertTrace(trace, project, id)))
-                        .doOnSuccess(__ -> eventBus.post(new TracesCreated(
-                                Set.of(project.id()),
-                                ctx.get(RequestContext.WORKSPACE_ID),
-                                ctx.get(RequestContext.USER_NAME))))));
+                        .doOnSuccess(__ -> {
+                            var savedTrace = trace.toBuilder().projectId(project.id()).projectName(projectName).build();
+                            String workspaceId = ctx.get(RequestContext.WORKSPACE_ID);
+                            String userName = ctx.get(RequestContext.USER_NAME);
+
+                            eventBus.post(new TracesCreated(List.of(savedTrace), workspaceId, userName));
+                        })));
     }
 
     @WithSpan
@@ -130,18 +152,22 @@ class TraceServiceImpl implements TraceService {
                     .map(projects -> bindTraceToProjectAndId(batch, projects))
                     .subscribeOn(Schedulers.boundedElastic());
 
+            String workspaceId = ctx.get(RequestContext.WORKSPACE_ID);
+            String userName = ctx.get(RequestContext.USER_NAME);
+
             return resolveProjects
                     .flatMap(traces -> template.nonTransaction(connection -> dao.batchInsert(traces, connection))
-                            .doOnSuccess(__ -> eventBus.post(new TracesCreated(
-                                    traces.stream().map(Trace::projectId).collect(Collectors.toUnmodifiableSet()),
-                                    ctx.get(RequestContext.WORKSPACE_ID),
-                                    ctx.get(RequestContext.USER_NAME)))));
+                            .doOnSuccess(__ -> eventBus.post(new TracesCreated(traces, workspaceId, userName))));
         });
     }
 
     private List<Trace> bindTraceToProjectAndId(TraceBatch batch, List<Project> projects) {
         Map<String, Project> projectPerName = projects.stream()
-                .collect(Collectors.toMap(Project::name, Function.identity()));
+                .collect(Collectors.toMap(
+                        Project::name,
+                        Function.identity(),
+                        BinaryOperatorUtils.last(),
+                        () -> new TreeMap<>(String.CASE_INSENSITIVE_ORDER)));
 
         return batch.traces()
                 .stream()
@@ -152,7 +178,7 @@ class TraceServiceImpl implements TraceService {
                     UUID id = trace.id() == null ? idGenerator.generateId() : trace.id();
                     IdGenerator.validateVersion(id, TRACE_KEY);
 
-                    return trace.toBuilder().id(id).projectId(project.id()).build();
+                    return trace.toBuilder().id(id).projectId(project.id()).projectName(project.name()).build();
                 })
                 .toList();
     }
@@ -168,8 +194,8 @@ class TraceServiceImpl implements TraceService {
     private <T> Mono<T> handleDBError(Throwable ex) {
         if (ex instanceof ClickHouseException
                 && ex.getMessage().contains("TOO_LARGE_STRING_SIZE")
-                && (ex.getMessage().contains("_CAST(project_id, FixedString(36))")
-                        && ex.getMessage().contains(", CAST(leftPad(workspace_id, 40, '*'), 'FixedString(19)') ::"))) {
+                && ex.getMessage().contains("String too long for type FixedString")
+                && (ex.getMessage().contains("project_id") || ex.getMessage().contains("workspace_id"))) {
 
             return failWithConflict(PROJECT_NAME_AND_WORKSPACE_NAME_MISMATCH);
         }
@@ -286,28 +312,27 @@ class TraceServiceImpl implements TraceService {
         return Mono.error(new IdentifierMismatchException(new ErrorMessage(List.of(error))));
     }
 
-    private NotFoundException failWithNotFound(String error) {
-        log.info(error);
-        return new NotFoundException(Response.status(404).entity(new ErrorMessage(List.of(error))).build());
-    }
-
     @Override
     @WithSpan
     public Mono<Trace> get(@NonNull UUID id) {
         return template.nonTransaction(connection -> dao.findById(id, connection))
-                .switchIfEmpty(Mono.defer(() -> Mono.error(failWithNotFound("Trace not found"))));
+                .switchIfEmpty(Mono.defer(() -> Mono.error(failWithNotFound("Trace", id))));
+    }
+
+    @Override
+    public Mono<TraceDetails> getTraceDetailsById(UUID id) {
+        return template.nonTransaction(connection -> dao.getTraceDetailsById(id, connection))
+                .switchIfEmpty(Mono.defer(() -> Mono.error(failWithNotFound("Trace", id.toString()))));
     }
 
     @Override
     @WithSpan
     public Mono<Void> delete(@NonNull UUID id) {
         log.info("Deleting trace by id '{}'", id);
-        return lockService.executeWithLock(
-                new LockService.Lock(id, TRACE_KEY),
-                Mono.defer(() -> feedbackScoreDAO.deleteByEntityId(EntityType.TRACE, id))
-                        .then(Mono.defer(
-                                () -> template.nonTransaction(connection -> spanDAO.deleteByTraceId(id, connection))))
-                        .then(Mono.defer(() -> template.nonTransaction(connection -> dao.delete(id, connection)))));
+        return feedbackScoreDAO.deleteByEntityId(EntityType.TRACE, id)
+                .then(Mono.defer(() -> commentDAO.deleteByEntityId(CommentDAO.EntityType.TRACE, id)))
+                .then(Mono.defer(() -> spanService.deleteByTraceIds(Set.of(id))))
+                .then(Mono.defer(() -> template.nonTransaction(connection -> dao.delete(id, connection))));
     }
 
     @Override
@@ -317,14 +342,14 @@ class TraceServiceImpl implements TraceService {
         log.info("Deleting traces, count '{}'", ids.size());
         return template
                 .nonTransaction(connection -> feedbackScoreDAO.deleteByEntityIds(EntityType.TRACE, ids))
-                .then(Mono
-                        .defer(() -> template.nonTransaction(connection -> spanDAO.deleteByTraceIds(ids, connection))))
+                .then(Mono.defer(() -> commentDAO.deleteByEntityIds(CommentDAO.EntityType.TRACE, ids)))
+                .then(Mono.defer(() -> spanService.deleteByTraceIds(ids)))
                 .then(Mono.defer(() -> template.nonTransaction(connection -> dao.delete(ids, connection))));
     }
 
     @Override
     @WithSpan
-    public Mono<Trace.TracePage> find(int page, int size, @NonNull TraceSearchCriteria criteria) {
+    public Mono<TracePage> find(int page, int size, @NonNull TraceSearchCriteria criteria) {
 
         if (criteria.projectId() != null) {
             return template.nonTransaction(connection -> dao.find(size, page, criteria, connection));
@@ -333,7 +358,7 @@ class TraceServiceImpl implements TraceService {
         return getProjectByName(criteria.projectName())
                 .flatMap(project -> template.nonTransaction(connection -> dao.find(
                         size, page, criteria.toBuilder().projectId(project.id()).build(), connection)))
-                .switchIfEmpty(Mono.just(Trace.TracePage.empty(page)));
+                .switchIfEmpty(Mono.just(TracePage.empty(page)));
     }
 
     @Override
@@ -398,4 +423,40 @@ class TraceServiceImpl implements TraceService {
         return template
                 .nonTransaction(connection -> dao.getLastUpdatedTraceAt(projectIds, workspaceId, connection));
     }
+
+    @Override
+    public Mono<TraceThreadPage> getTraceThreads(int page, int size, @NonNull TraceSearchCriteria criteria) {
+
+        if (criteria.projectId() != null) {
+            return dao.findThreads(size, page, criteria);
+        }
+
+        return getProjectByName(criteria.projectName())
+                .flatMap(project -> dao.findThreads(size, page, criteria.toBuilder().projectId(project.id()).build()))
+                .switchIfEmpty(Mono.just(TraceThreadPage.empty(page)));
+    }
+
+    @Override
+    public Mono<Void> deleteTraceThreads(@NonNull DeleteTraceThreads traceThreads) {
+        if (traceThreads.projectId() == null && traceThreads.projectName() == null) {
+            return Mono.error(new ClientErrorException("must provide either a project_name or a project_id",
+                    HttpStatus.SC_UNPROCESSABLE_ENTITY));
+        }
+
+        if (traceThreads.projectId() != null) {
+            return dao.deleteThreads(traceThreads.projectId(), traceThreads.threadIds())
+                    .then();
+        }
+
+        return getProjectByName(traceThreads.projectName())
+                .flatMap(project -> dao.deleteThreads(project.id(), traceThreads.threadIds()))
+                .then();
+    }
+
+    @Override
+    public Mono<TraceThread> getThreadById(@NonNull UUID projectId, @NonNull String threadId) {
+        return dao.findThreadById(projectId, threadId)
+                .switchIfEmpty(Mono.defer(() -> Mono.error(failWithNotFound("Trace Thread", threadId))));
+    }
+
 }

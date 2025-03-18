@@ -18,6 +18,7 @@
     --tooltip-foreground: 0 0% 100%;
 
     --popover: 0 0% 100%;
+    --popover-gray: 240 14% 99%;
     --popover-foreground: 222.2 84% 4.9%;
 
     --primary: 239 89% 64%;
@@ -185,6 +186,7 @@
   }
 
   .comet-content-inset {
+    --comet-content-width: calc(100vw - var(--sidebar-width));
     left: var(--sidebar-width);
   }
 
@@ -229,6 +231,10 @@
       border: 4px solid #fff;
     }
 
+    ::-webkit-scrollbar-thumb:hover {
+      background: #7d7d7d;
+    }
+
     ::-webkit-scrollbar-button {
       display: none;
     }
@@ -242,4 +248,90 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+}
+
+// Table
+
+// workaround to force firefox work correctly with cell height - https://stackoverflow.com/questions/36575846/how-to-make-div-fill-td-height-in-firefox
+.comet-fix-cell-height {
+  height: 1px;
+}
+
+@-moz-document url-prefix() {
+  .comet-fix-cell-height {
+    height: 100%;
+  }
+}
+
+// rewrite padding for first cell for tables that takes full width with sticky behaviour
+.comet-sticky-table {
+  thead:before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: hsl(var(--border));
+    z-index: 10;
+  }
+
+  thead:after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: hsl(var(--border));
+    z-index: 10;
+  }
+
+  td:first-child [data-cell-wrapper="true"],
+  th:first-child [data-header-wrapper="true"] {
+    padding-left: 24px !important;
+  }
+
+  td:last-child [data-cell-wrapper="true"],
+  th:last-child [data-header-wrapper="true"] {
+    padding-right: 24px !important;
+  }
+}
+
+.comet-line-highlight {
+  position: relative;
+
+  &:after {
+    content: "";
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: -5;
+    background: hsl(var(--secondary));
+  }
+}
+
+.comet-markdown {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  max-width: 100%;
+
+  pre code {
+    font-size: 0.875rem !important;
+  }
+}
+
+.json-view_github.dark {
+  color: white;
+  --json-property: white;
+  --json-index: white;
+  --json-number: white;
+  --json-string: white;
+  --json-boolean: white;
+  --json-null: white;
 }

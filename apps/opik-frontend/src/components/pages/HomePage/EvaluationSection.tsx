@@ -3,7 +3,7 @@ import { keepPreviousData } from "@tanstack/react-query";
 import useLocalStorageState from "use-local-storage-state";
 import { ColumnPinningState } from "@tanstack/react-table";
 import { Link } from "@tanstack/react-router";
-import { Book } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import get from "lodash/get";
 
 import DataTable from "@/components/shared/DataTable/DataTable";
@@ -18,8 +18,9 @@ import { COLUMN_NAME_ID, COLUMN_SELECT_ID, COLUMN_TYPE } from "@/types/shared";
 import { RESOURCE_TYPE } from "@/components/shared/ResourceLink/ResourceLink";
 import { Experiment } from "@/types/datasets";
 import { convertColumnDataToColumn } from "@/lib/table";
-import { buildDocsUrl } from "@/lib/utils";
 import { formatDate } from "@/lib/date";
+import FeedbackScoreListCell from "@/components/shared/DataTableCells/FeedbackScoreListCell";
+import { formatNumericData } from "@/lib/utils";
 
 const COLUMNS_WIDTH_KEY = "home-experiments-columns-width";
 
@@ -52,36 +53,30 @@ export const COLUMNS = convertColumnDataToColumn<Experiment, Experiment>(
       },
     },
     {
-      id: "prompt",
-      label: "Prompt commit",
-      type: COLUMN_TYPE.string,
-      cell: ResourceCell as never,
-      customMeta: {
-        nameKey: "prompt_version.commit",
-        idKey: "prompt_version.prompt_id",
-        resource: RESOURCE_TYPE.prompt,
-        getSearch: (data: Experiment) => ({
-          activeVersionId: get(data, "prompt_version.id", null),
-        }),
-      },
+      id: "trace_count",
+      label: "Nb of items",
+      type: COLUMN_TYPE.number,
     },
     {
-      id: "trace_count",
-      label: "Trace count",
-      type: COLUMN_TYPE.number,
+      id: "feedback_scores",
+      label: "Feedback scores",
+      type: COLUMN_TYPE.numberDictionary,
+      accessorFn: (row) =>
+        get(row, "feedback_scores", []).map((score) => ({
+          ...score,
+          value: formatNumericData(score.value),
+        })),
+      cell: FeedbackScoreListCell as never,
+      customMeta: {
+        getHoverCardName: (row: Experiment) => row.name,
+        isAverageScores: true,
+      },
     },
     {
       id: "created_at",
       label: "Created",
       type: COLUMN_TYPE.time,
       accessorFn: (row) => formatDate(row.created_at),
-      sortable: true,
-    },
-    {
-      id: "last_updated_at",
-      label: "Last updated",
-      type: COLUMN_TYPE.time,
-      accessorFn: (row) => formatDate(row.last_updated_at),
       sortable: true,
     },
   ],
@@ -138,29 +133,10 @@ const EvaluationSection: React.FunctionComponent = () => {
   }
 
   return (
-    <div className="pb-4">
-      <div className="flex items-center justify-between gap-8 pb-4 pt-2">
-        <div className="flex items-center gap-2">
-          <h2 className="comet-body-accented truncate break-words">
-            Evaluation
-          </h2>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" asChild>
-            <a
-              href={buildDocsUrl("/evaluation/concepts")}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Book className="mr-2 size-4 shrink-0" />
-              Learn more
-            </a>
-          </Button>
-          <Link to="/$workspaceName/experiments" params={{ workspaceName }}>
-            <Button variant="outline">View all experiments</Button>
-          </Link>
-        </div>
-      </div>
+    <div className="pb-4 pt-2">
+      <h2 className="comet-body-accented truncate break-words pb-3">
+        Evaluation
+      </h2>
       <DataTable
         columns={COLUMNS}
         data={experiments}
@@ -174,6 +150,13 @@ const EvaluationSection: React.FunctionComponent = () => {
           </DataTableNoData>
         }
       />
+      <div className="flex justify-end pt-1">
+        <Link to="/$workspaceName/experiments" params={{ workspaceName }}>
+          <Button variant="ghost" className="flex items-center gap-1 pr-0">
+            All experiments <ArrowRight className="size-4" />
+          </Button>
+        </Link>
+      </div>
       <AddExperimentDialog
         key={resetDialogKeyRef.current}
         open={openDialog}

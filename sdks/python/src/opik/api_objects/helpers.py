@@ -1,16 +1,13 @@
 import datetime
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 
-import uuid_extensions
+from opik import llm_usage
 
 from .. import config, datetime_helpers, logging_messages
+from ..id_helpers import generate_id  # noqa: F401 , keep it here for backward compatibility with external dependants
 
 LOGGER = logging.getLogger(__name__)
-
-
-def generate_id() -> str:
-    return str(uuid_extensions.uuid7())
 
 
 def datetime_to_iso8601_if_not_None(
@@ -52,3 +49,24 @@ def resolve_child_span_project_name(
         project_name = child_project_name
 
     return project_name
+
+
+def add_usage_to_metadata(
+    usage: Optional[Dict[str, Any]],
+    metadata: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    if usage is None and metadata is None:
+        return None
+
+    if usage is None:
+        return metadata
+
+    if metadata is None:
+        metadata = {}
+
+    if isinstance(usage, llm_usage.OpikUsage):
+        metadata["usage"] = usage.provider_usage.model_dump(exclude_none=True)
+        return metadata
+
+    metadata["usage"] = usage
+    return metadata

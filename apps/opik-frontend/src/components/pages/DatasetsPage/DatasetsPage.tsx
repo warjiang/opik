@@ -1,5 +1,8 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { keepPreviousData } from "@tanstack/react-query";
+import useLocalStorageState from "use-local-storage-state";
+import { useNavigate } from "@tanstack/react-router";
+
 import DataTable from "@/components/shared/DataTable/DataTable";
 import DataTablePagination from "@/components/shared/DataTablePagination/DataTablePagination";
 import DataTableNoData from "@/components/shared/DataTableNoData/DataTableNoData";
@@ -7,7 +10,7 @@ import IdCell from "@/components/shared/DataTableCells/IdCell";
 import useDatasetsList from "@/api/datasets/useDatasetsList";
 import { Dataset } from "@/types/datasets";
 import Loader from "@/components/shared/Loader/Loader";
-import AddDatasetDialog from "@/components/pages/DatasetsPage/AddDatasetDialog";
+import AddEditDatasetDialog from "@/components/pages/DatasetsPage/AddEditDatasetDialog";
 import DatasetsActionsPanel from "@/components/pages/DatasetsPage/DatasetsActionsPanel";
 import { DatasetRowActionsCell } from "@/components/pages/DatasetsPage/DatasetRowActionsCell";
 import { Button } from "@/components/ui/button";
@@ -21,7 +24,6 @@ import {
   COLUMN_TYPE,
   ColumnData,
 } from "@/types/shared";
-import useLocalStorageState from "use-local-storage-state";
 import { convertColumnDataToColumn, mapColumnDataFields } from "@/lib/table";
 import ColumnsButton from "@/components/shared/ColumnsButton/ColumnsButton";
 import { ColumnPinningState, RowSelectionState } from "@tanstack/react-table";
@@ -88,6 +90,7 @@ export const DEFAULT_SELECTED_COLUMNS: string[] = [
 
 const DatasetsPage: React.FunctionComponent = () => {
   const workspaceName = useAppStore((state) => state.activeWorkspaceName);
+  const navigate = useNavigate();
 
   const resetDialogKeyRef = useRef(0);
   const [openDialog, setOpenDialog] = useState<boolean>(false);
@@ -177,6 +180,21 @@ const DatasetsPage: React.FunctionComponent = () => {
     resetDialogKeyRef.current = resetDialogKeyRef.current + 1;
   }, []);
 
+  const onDatasetCreated = useCallback(
+    (dataset: Dataset) => {
+      if (!dataset.id) return;
+
+      navigate({
+        to: "/$workspaceName/datasets/$datasetId",
+        params: {
+          datasetId: dataset.id,
+          workspaceName,
+        },
+      });
+    },
+    [workspaceName, navigate],
+  );
+
   if (isPending) {
     return <Loader />;
   }
@@ -192,10 +210,11 @@ const DatasetsPage: React.FunctionComponent = () => {
           setSearchText={setSearch}
           placeholder="Search by name"
           className="w-[320px]"
+          dimension="sm"
         ></SearchInput>
         <div className="flex items-center gap-2">
           <DatasetsActionsPanel datasets={selectedRows} />
-          <Separator orientation="vertical" className="ml-2 mr-2.5 h-6" />
+          <Separator orientation="vertical" className="mx-1 h-4" />
           <ColumnsButton
             columns={DEFAULT_COLUMNS}
             selectedColumns={selectedColumns}
@@ -203,7 +222,7 @@ const DatasetsPage: React.FunctionComponent = () => {
             order={columnsOrder}
             onOrderChange={setColumnsOrder}
           ></ColumnsButton>
-          <Button variant="default" onClick={handleNewDatasetClick}>
+          <Button variant="default" size="sm" onClick={handleNewDatasetClick}>
             Create new dataset
           </Button>
         </div>
@@ -237,10 +256,11 @@ const DatasetsPage: React.FunctionComponent = () => {
           total={total}
         ></DataTablePagination>
       </div>
-      <AddDatasetDialog
+      <AddEditDatasetDialog
         key={resetDialogKeyRef.current}
         open={openDialog}
         setOpen={setOpenDialog}
+        onDatasetCreated={onDatasetCreated}
       />
     </div>
   );

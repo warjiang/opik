@@ -7,6 +7,7 @@ from ..types.bi_information_response import BiInformationResponse
 from ..core.pydantic_utilities import parse_obj_as
 from json.decoder import JSONDecodeError
 from ..core.api_error import ApiError
+from ..types.spans_count_response import SpansCountResponse
 from ..types.trace_count_response import TraceCountResponse
 from ..core.client_wrapper import AsyncClientWrapper
 
@@ -35,7 +36,10 @@ class SystemUsageClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.system_usage.get_dataset_bi_info()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -77,7 +81,10 @@ class SystemUsageClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.system_usage.get_experiment_bi_info()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -91,6 +98,51 @@ class SystemUsageClient:
                     BiInformationResponse,
                     parse_obj_as(
                         type_=BiInformationResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    def get_spans_count_for_workspaces(
+        self, *, request_options: typing.Optional[RequestOptions] = None
+    ) -> SpansCountResponse:
+        """
+        Get spans count on previous day for all available workspaces
+
+        Parameters
+        ----------
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        SpansCountResponse
+            SpanCountResponse resource
+
+        Examples
+        --------
+        from Opik import OpikApi
+
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+        client.system_usage.get_spans_count_for_workspaces()
+        """
+        _response = self._client_wrapper.httpx_client.request(
+            "v1/internal/usage/workspace-span-counts",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    SpansCountResponse,
+                    parse_obj_as(
+                        type_=SpansCountResponse,  # type: ignore
                         object_=_response.json(),
                     ),
                 )
@@ -119,7 +171,10 @@ class SystemUsageClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.system_usage.get_traces_bi_info()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -161,7 +216,10 @@ class SystemUsageClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.system_usage.get_traces_count_for_workspaces()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -210,7 +268,10 @@ class AsyncSystemUsageClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -260,7 +321,10 @@ class AsyncSystemUsageClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -280,6 +344,59 @@ class AsyncSystemUsageClient:
                     BiInformationResponse,
                     parse_obj_as(
                         type_=BiInformationResponse,  # type: ignore
+                        object_=_response.json(),
+                    ),
+                )
+            _response_json = _response.json()
+        except JSONDecodeError:
+            raise ApiError(status_code=_response.status_code, body=_response.text)
+        raise ApiError(status_code=_response.status_code, body=_response_json)
+
+    async def get_spans_count_for_workspaces(
+        self, *, request_options: typing.Optional[RequestOptions] = None
+    ) -> SpansCountResponse:
+        """
+        Get spans count on previous day for all available workspaces
+
+        Parameters
+        ----------
+        request_options : typing.Optional[RequestOptions]
+            Request-specific configuration.
+
+        Returns
+        -------
+        SpansCountResponse
+            SpanCountResponse resource
+
+        Examples
+        --------
+        import asyncio
+
+        from Opik import AsyncOpikApi
+
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
+
+
+        async def main() -> None:
+            await client.system_usage.get_spans_count_for_workspaces()
+
+
+        asyncio.run(main())
+        """
+        _response = await self._client_wrapper.httpx_client.request(
+            "v1/internal/usage/workspace-span-counts",
+            method="GET",
+            request_options=request_options,
+        )
+        try:
+            if 200 <= _response.status_code < 300:
+                return typing.cast(
+                    SpansCountResponse,
+                    parse_obj_as(
+                        type_=SpansCountResponse,  # type: ignore
                         object_=_response.json(),
                     ),
                 )
@@ -310,7 +427,10 @@ class AsyncSystemUsageClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -360,7 +480,10 @@ class AsyncSystemUsageClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:

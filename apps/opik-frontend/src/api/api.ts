@@ -8,6 +8,8 @@ const axiosInstance = axios.create({
 
 axiosInstance.defaults.withCredentials = true;
 
+export const CODE_EXECUTOR_SERVICE_URL = import.meta.env
+  .VITE_GET_STARTED_API_URL;
 export const PROJECTS_REST_ENDPOINT = "/v1/private/projects/";
 export const DATASETS_REST_ENDPOINT = "/v1/private/datasets/";
 export const EXPERIMENTS_REST_ENDPOINT = "/v1/private/experiments/";
@@ -17,12 +19,17 @@ export const TRACES_REST_ENDPOINT = "/v1/private/traces/";
 export const SPANS_REST_ENDPOINT = "/v1/private/spans/";
 export const PROMPTS_REST_ENDPOINT = "/v1/private/prompts/";
 export const PROVIDER_KEYS_REST_ENDPOINT = "/v1/private/llm-provider-key/";
+export const AUTOMATIONS_REST_ENDPOINT = "/v1/private/automations/";
 
 export const COMPARE_EXPERIMENTS_KEY = "compare-experiments";
 export const SPANS_KEY = "spans";
 export const TRACES_KEY = "traces";
 export const TRACE_KEY = "trace";
-export const PROVIDERS_KEYS_KEY = "providerKeys";
+export const THREADS_KEY = "threads";
+export const PROVIDERS_KEYS_KEY = "provider-keys";
+export const AUTOMATIONS_KEY = "automations";
+export const PROJECTS_KEY = "projects";
+export const PROJECT_STATISTICS_KEY = "project-statistics";
 
 // stats for feedback
 export const STATS_COMET_ENDPOINT = "https://stats.comet.com/notify/event/";

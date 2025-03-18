@@ -2,6 +2,7 @@ package com.comet.opik.api.resources.v1.priv;
 
 import com.comet.opik.api.BatchDelete;
 import com.comet.opik.api.Column;
+import com.comet.opik.api.Comment;
 import com.comet.opik.api.Dataset;
 import com.comet.opik.api.DatasetIdentifier;
 import com.comet.opik.api.DatasetItem;
@@ -20,11 +21,13 @@ import com.comet.opik.api.PageColumns;
 import com.comet.opik.api.Project;
 import com.comet.opik.api.Prompt;
 import com.comet.opik.api.PromptVersion;
+import com.comet.opik.api.ReactServiceErrorResponse;
 import com.comet.opik.api.ScoreSource;
 import com.comet.opik.api.Span;
 import com.comet.opik.api.Trace;
 import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.filter.ExperimentsComparisonFilter;
+import com.comet.opik.api.filter.ExperimentsComparisonValidKnownField;
 import com.comet.opik.api.filter.FieldType;
 import com.comet.opik.api.filter.Filter;
 import com.comet.opik.api.filter.Operator;
@@ -37,12 +40,17 @@ import com.comet.opik.api.resources.utils.RedisContainerUtils;
 import com.comet.opik.api.resources.utils.TestDropwizardAppExtensionUtils;
 import com.comet.opik.api.resources.utils.TestUtils;
 import com.comet.opik.api.resources.utils.WireMockUtils;
+import com.comet.opik.api.resources.utils.resources.DatasetResourceClient;
+import com.comet.opik.api.resources.utils.resources.ExperimentResourceClient;
 import com.comet.opik.api.resources.utils.resources.PromptResourceClient;
+import com.comet.opik.api.resources.utils.resources.TraceResourceClient;
 import com.comet.opik.api.sorting.Direction;
 import com.comet.opik.api.sorting.SortableFields;
 import com.comet.opik.api.sorting.SortingField;
 import com.comet.opik.domain.DatasetDAO;
 import com.comet.opik.domain.FeedbackScoreMapper;
+import com.comet.opik.extensions.DropwizardAppExtensionProvider;
+import com.comet.opik.extensions.RegisterApp;
 import com.comet.opik.podam.PodamFactoryUtils;
 import com.comet.opik.utils.JsonUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -55,6 +63,7 @@ import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.TextNode;
 import com.fasterxml.uuid.Generators;
 import com.fasterxml.uuid.impl.TimeBasedEpochGenerator;
+import com.github.tomakehurst.wiremock.client.WireMock;
 import com.redis.testcontainers.RedisContainer;
 import jakarta.ws.rs.client.Entity;
 import jakarta.ws.rs.client.WebTarget;
@@ -63,6 +72,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.apache.commons.collections4.CollectionUtils;
+import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.hc.core5.http.HttpStatus;
 import org.glassfish.jersey.client.ChunkedInput;
@@ -75,7 +85,7 @@ import org.junit.jupiter.api.Named;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -84,7 +94,6 @@ import org.testcontainers.clickhouse.ClickHouseContainer;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
-import reactor.core.publisher.Mono;
 import ru.vyarus.dropwizard.guice.test.ClientSupport;
 import ru.vyarus.dropwizard.guice.test.jupiter.ext.TestDropwizardAppExtension;
 import ru.vyarus.guicey.jdbi3.tx.TransactionTemplate;
@@ -118,18 +127,21 @@ import java.util.stream.StreamSupport;
 import static com.comet.opik.api.Column.ColumnType;
 import static com.comet.opik.api.DatasetItem.DatasetItemPage;
 import static com.comet.opik.api.resources.utils.ClickHouseContainerUtils.DATABASE_NAME;
+import static com.comet.opik.api.resources.utils.CommentAssertionUtils.IGNORED_FIELDS_COMMENTS;
+import static com.comet.opik.api.resources.utils.FeedbackScoreAssertionUtils.assertFeedbackScoresIgnoredFieldsAndSetThemToNull;
 import static com.comet.opik.api.resources.utils.MigrationUtils.CLICKHOUSE_CHANGELOG_FILE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.FAKE_API_KEY_MESSAGE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.NO_API_KEY_RESPONSE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.UNAUTHORIZED_RESPONSE;
 import static com.comet.opik.api.resources.utils.WireMockUtils.WireMockRuntime;
 import static com.comet.opik.infrastructure.auth.RequestContext.SESSION_COOKIE;
 import static com.comet.opik.infrastructure.auth.RequestContext.WORKSPACE_HEADER;
-import static com.comet.opik.infrastructure.auth.TestHttpClientUtils.UNAUTHORIZED_RESPONSE;
 import static com.comet.opik.infrastructure.db.TransactionTemplateAsync.WRITE;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
-import static com.github.tomakehurst.wiremock.client.WireMock.unauthorized;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static java.util.stream.Collectors.flatMapping;
 import static java.util.stream.Collectors.groupingBy;
@@ -143,6 +155,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Dataset Resource Test")
+@ExtendWith(DropwizardAppExtensionProvider.class)
 class DatasetsResourceTest {
 
     private static final String BASE_RESOURCE_URI = "%s/v1/private/datasets";
@@ -153,7 +166,7 @@ class DatasetsResourceTest {
     private static final String URL_TEMPLATE_TRACES = "%s/v1/private/traces";
 
     public static final String[] IGNORED_FIELDS_LIST = {"feedbackScores", "createdAt", "lastUpdatedAt", "createdBy",
-            "lastUpdatedBy"};
+            "lastUpdatedBy", "comments"};
     public static final String[] IGNORED_FIELDS_DATA_ITEM = {"createdAt", "lastUpdatedAt", "experimentItems",
             "createdBy", "lastUpdatedBy"};
     public static final String[] DATASET_IGNORED_FIELDS = {"id", "createdAt", "lastUpdatedAt", "createdBy",
@@ -167,18 +180,15 @@ class DatasetsResourceTest {
 
     private static final TimeBasedEpochGenerator GENERATOR = Generators.timeBasedEpochGenerator();
 
-    private static final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
+    private final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
+    private final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
+    private final ClickHouseContainer CLICKHOUSE = ClickHouseContainerUtils.newClickHouseContainer();
+    private final WireMockRuntime wireMock;
 
-    private static final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
+    @RegisterApp
+    private final TestDropwizardAppExtension app;
 
-    private static final ClickHouseContainer CLICKHOUSE = ClickHouseContainerUtils.newClickHouseContainer();
-
-    @RegisterExtension
-    private static final TestDropwizardAppExtension app;
-
-    private static final WireMockRuntime wireMock;
-
-    static {
+    {
         Startables.deepStart(REDIS, MYSQL, CLICKHOUSE).join();
 
         wireMock = WireMockUtils.startWireMock();
@@ -198,6 +208,9 @@ class DatasetsResourceTest {
     private String baseURI;
     private ClientSupport client;
     private PromptResourceClient promptResourceClient;
+    private ExperimentResourceClient experimentResourceClient;
+    private DatasetResourceClient datasetResourceClient;
+    private TraceResourceClient traceResourceClient;
     private TransactionTemplate mySqlTemplate;
 
     @BeforeAll
@@ -206,7 +219,7 @@ class DatasetsResourceTest {
         MigrationUtils.runDbMigration(jdbi, MySQLContainerUtils.migrationParameters());
 
         try (var connection = CLICKHOUSE.createConnection("")) {
-            MigrationUtils.runDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
+            MigrationUtils.runClickhouseDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
                     ClickHouseContainerUtils.migrationParameters());
         }
 
@@ -219,6 +232,9 @@ class DatasetsResourceTest {
         mockTargetWorkspace(API_KEY, TEST_WORKSPACE, WORKSPACE_ID);
 
         promptResourceClient = new PromptResourceClient(client, baseURI, factory);
+        experimentResourceClient = new ExperimentResourceClient(client, baseURI, factory);
+        datasetResourceClient = new DatasetResourceClient(client, baseURI);
+        this.traceResourceClient = new TraceResourceClient(this.client, baseURI);
     }
 
     @AfterAll
@@ -226,11 +242,11 @@ class DatasetsResourceTest {
         wireMock.server().stop();
     }
 
-    private static void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
+    private void mockTargetWorkspace(String apiKey, String workspaceName, String workspaceId) {
         AuthTestUtils.mockTargetWorkspace(wireMock.server(), apiKey, workspaceName, workspaceId, USER);
     }
 
-    private static void mockSessionCookieTargetWorkspace(String sessionToken, String workspaceName,
+    private void mockSessionCookieTargetWorkspace(String sessionToken, String workspaceName,
             String workspaceId) {
         AuthTestUtils.mockSessionCookieTargetWorkspace(wireMock.server(), sessionToken, workspaceName, workspaceId,
                 USER);
@@ -296,9 +312,9 @@ class DatasetsResourceTest {
 
         Stream<Arguments> credentials() {
             return Stream.of(
-                    arguments(okApikey, true),
-                    arguments(fakeApikey, false),
-                    arguments("", false));
+                    arguments(okApikey, true, null),
+                    arguments(fakeApikey, false, UNAUTHORIZED_RESPONSE),
+                    arguments("", false, NO_API_KEY_RESPONSE));
         }
 
         @BeforeEach
@@ -308,19 +324,17 @@ class DatasetsResourceTest {
                     post(urlPathEqualTo("/opik/auth"))
                             .withHeader(HttpHeaders.AUTHORIZATION, equalTo(fakeApikey))
                             .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(unauthorized()));
-
-            wireMock.server().stubFor(
-                    post(urlPathEqualTo("/opik/auth"))
-                            .withHeader(HttpHeaders.AUTHORIZATION, equalTo(""))
-                            .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(unauthorized()));
+                            .willReturn(WireMock.unauthorized().withHeader("Content-Type", "application/json")
+                                    .withJsonBody(JsonUtils.readTree(
+                                            new ReactServiceErrorResponse(FAKE_API_KEY_MESSAGE,
+                                                    401)))));
         }
 
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("create dataset: when api key is present, then return proper response")
-        void createDataset__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void createDataset__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             var project = factory.manufacturePojo(Project.class).toBuilder()
                     .id(null)
                     .build();
@@ -341,7 +355,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -349,7 +363,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Get dataset by id: when api key is present, then return proper response")
-        void getDatasetById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void getDatasetById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             Dataset dataset = factory.manufacturePojo(Dataset.class).toBuilder()
                     .id(null)
@@ -377,7 +392,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -385,7 +400,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Get dataset by name: when api key is present, then return proper response")
-        void getDatasetByName__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void getDatasetByName__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             var dataset = factory.manufacturePojo(Dataset.class).toBuilder()
                     .id(null)
@@ -413,7 +429,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -421,7 +437,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Get datasets: when api key is present, then return proper response")
-        void getDatasets__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void getDatasets__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             String workspaceName = UUID.randomUUID().toString();
             String workspaceId = UUID.randomUUID().toString();
@@ -450,7 +467,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -458,7 +475,10 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Update dataset: when api key is present, then return proper response")
-        void updateDataset__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void updateDataset__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
+
+            mockTargetWorkspace(okApikey, TEST_WORKSPACE, WORKSPACE_ID);
 
             var dataset = factory.manufacturePojo(Dataset.class).toBuilder()
                     .id(null)
@@ -483,7 +503,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -491,7 +511,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Delete dataset: when api key is present, then return proper response")
-        void deleteDataset__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void deleteDataset__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             var dataset = factory.manufacturePojo(Dataset.class).toBuilder()
                     .id(null)
@@ -516,7 +537,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -524,7 +545,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Create dataset items: when api key is present, then return proper response")
-        void createDatasetItems__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void createDatasetItems__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             var items = PodamFactoryUtils.manufacturePojoList(factory, DatasetItem.class).stream()
                     .map(item -> item.toBuilder()
@@ -556,7 +578,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
 
@@ -566,7 +588,7 @@ class DatasetsResourceTest {
         @MethodSource("credentials")
         @DisplayName("Get dataset items by dataset id: when api key is present, then return proper response")
         void getDatasetItemsByDatasetId__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey,
-                boolean shouldSucceed) {
+                boolean shouldSucceed, io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             var datasetId = createAndAssert(factory.manufacturePojo(Dataset.class).toBuilder()
                     .id(null)
@@ -607,7 +629,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -615,7 +637,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Stream dataset items: when api key is present, then return proper response")
-        void streamDatasetItems__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void streamDatasetItems__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String name = UUID.randomUUID().toString();
 
             var datasetId = createAndAssert(factory.manufacturePojo(Dataset.class).toBuilder()
@@ -661,7 +684,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -669,7 +692,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Delete dataset items: when api key is present, then return proper response")
-        void deleteDatasetItems__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void deleteDatasetItems__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
 
             var datasetId = createAndAssert(factory.manufacturePojo(Dataset.class).toBuilder()
                     .id(null)
@@ -706,7 +730,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -714,7 +738,8 @@ class DatasetsResourceTest {
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("Get dataset item by id: when api key is present, then return proper response")
-        void getDatasetItemById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed) {
+        void getDatasetItemById__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean shouldSucceed,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             String name = UUID.randomUUID().toString();
 
             var datasetId = createAndAssert(factory.manufacturePojo(Dataset.class).toBuilder()
@@ -751,7 +776,7 @@ class DatasetsResourceTest {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(401);
                     assertThat(actualResponse.hasEntity()).isTrue();
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
 
@@ -779,7 +804,10 @@ class DatasetsResourceTest {
                     post(urlPathEqualTo("/opik/auth-session"))
                             .withCookie(SESSION_COOKIE, equalTo(fakeSessionToken))
                             .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(unauthorized()));
+                            .willReturn(WireMock.unauthorized().withHeader("Content-Type", "application/json")
+                                    .withJsonBody(JsonUtils.readTree(
+                                            new ReactServiceErrorResponse(FAKE_API_KEY_MESSAGE,
+                                                    401)))));
         }
 
         Stream<Arguments> credentials() {
@@ -1457,14 +1485,12 @@ class DatasetsResourceTest {
 
             createAndAssert(dataset);
 
-            var experiment1 = factory.manufacturePojo(Experiment.class).toBuilder()
+            var experiment1 = experimentResourceClient.createPartialExperiment()
                     .datasetName(dataset.name())
-                    .promptVersion(null)
                     .build();
 
-            var experiment2 = factory.manufacturePojo(Experiment.class).toBuilder()
+            var experiment2 = experimentResourceClient.createPartialExperiment()
                     .datasetName(dataset.name())
-                    .promptVersion(null)
                     .build();
 
             createAndAssert(experiment1, API_KEY, TEST_WORKSPACE);
@@ -1561,12 +1587,12 @@ class DatasetsResourceTest {
         }
     }
 
-    private void createAndAssert(Experiment experiment1, String apiKey, String workspaceName) {
+    private void createAndAssert(Experiment experiment, String apiKey, String workspaceName) {
         try (var actualResponse = client.target(EXPERIMENT_RESOURCE_URI.formatted(baseURI))
                 .request()
                 .header(HttpHeaders.AUTHORIZATION, apiKey)
                 .header(WORKSPACE_HEADER, workspaceName)
-                .post(Entity.json(experiment1))) {
+                .post(Entity.json(experiment))) {
 
             assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(201);
             assertThat(actualResponse.hasEntity()).isFalse();
@@ -1942,11 +1968,11 @@ class DatasetsResourceTest {
 
             AtomicInteger index = new AtomicInteger();
 
-            var experiments = PodamFactoryUtils.manufacturePojoList(factory, Experiment.class).stream()
+            var experiments = experimentResourceClient.generateExperimentList()
+                    .stream()
                     .flatMap(experiment -> Stream.of(experiment.toBuilder()
                             .datasetName(datasets.get(index.getAndIncrement()).name())
                             .datasetId(null)
-                            .promptVersion(null)
                             .build()))
                     .toList();
 
@@ -2156,9 +2182,8 @@ class DatasetsResourceTest {
 
             createAndAssert(dataset, apiKey, workspaceName);
 
-            Experiment experiment = factory.manufacturePojo(Experiment.class).toBuilder()
+            Experiment experiment = experimentResourceClient.createPartialExperiment()
                     .datasetName(dataset.name())
-                    .promptVersion(null)
                     .build();
 
             createAndAssert(
@@ -2189,10 +2214,9 @@ class DatasetsResourceTest {
 
             IntStream.range(0, datasetCount - expectedMatchCount)
                     .parallel()
-                    .mapToObj(i -> createDatasetWithExperiment(apiKey, workspaceName, null))
-                    .toList();
+                    .forEach(i -> createDatasetWithExperiment(apiKey, workspaceName, null));
 
-            Prompt prompt = Prompt.builder().name(UUID.randomUUID().toString()).build();
+            Prompt prompt = factory.manufacturePojo(Prompt.class).toBuilder().latestVersion(null).build();
 
             PromptVersion promptVersion = promptResourceClient.createPromptVersion(prompt, apiKey, workspaceName);
 
@@ -2213,6 +2237,7 @@ class DatasetsResourceTest {
                                                 .id(promptVersion.id())
                                                 .commit(promptVersion.commit())
                                                 .build())
+                                .promptVersions(null)
                                 .build();
 
                         createAndAssert(
@@ -2231,21 +2256,71 @@ class DatasetsResourceTest {
                     .sorted(Comparator.comparing(Dataset::id))
                     .toList();
 
-            WebTarget webTarget = client.target(BASE_RESOURCE_URI.formatted(baseURI))
-                    .queryParam("with_experiments_only", true)
-                    .queryParam("prompt_id", promptVersion.promptId());
+            var actualEntity = datasetResourceClient.getDatasetPage(apiKey, workspaceName, expectedDatasets.size(),
+                    promptVersion);
 
-            if (expectedDatasets.size() > 0) {
-                webTarget = webTarget.queryParam("size", expectedDatasets.size());
-            }
+            findAndAssertPage(actualEntity, expectedDatasets.size(), expectedDatasets.size(), 1,
+                    expectedDatasets.reversed());
+        }
 
-            var actualResponse = webTarget
-                    .request()
-                    .header(HttpHeaders.AUTHORIZATION, apiKey)
-                    .header(WORKSPACE_HEADER, workspaceName)
-                    .get();
+        @ParameterizedTest
+        @MethodSource("getDatasets__whenSearchingByPromptIdAndResultHavingXDatasetsLinkedToExperimentsWithPromptId__thenReturnPage")
+        @DisplayName("when searching by prompt id and result having {} datasets linked to experiments with list of prompt ids, then return page")
+        void getDatasets__whenSearchingByPromptIdAndResultHavingXDatasetsLinkedToExperimentsWithListOfPromptIds__thenReturnPage(
+                int datasetCount, int expectedMatchCount) {
 
-            var actualEntity = actualResponse.readEntity(Dataset.DatasetPage.class);
+            var workspaceName = UUID.randomUUID().toString();
+            var workspaceId = UUID.randomUUID().toString();
+            var apiKey = UUID.randomUUID().toString();
+
+            mockTargetWorkspace(apiKey, workspaceName, workspaceId);
+
+            IntStream.range(0, datasetCount - expectedMatchCount)
+                    .parallel()
+                    .forEach(i -> createDatasetWithExperiment(apiKey, workspaceName, null));
+
+            Prompt prompt = factory.manufacturePojo(Prompt.class).toBuilder().latestVersion(null).build();
+
+            PromptVersion promptVersion = promptResourceClient.createPromptVersion(prompt, apiKey, workspaceName);
+
+            List<Dataset> expectedDatasets = IntStream.range(0, expectedMatchCount)
+                    .parallel()
+                    .mapToObj(i -> {
+                        var dataset = factory.manufacturePojo(Dataset.class).toBuilder()
+                                .name(UUID.randomUUID().toString())
+                                .build();
+
+                        createAndAssert(dataset, apiKey, workspaceName);
+
+                        Experiment experiment = factory.manufacturePojo(Experiment.class).toBuilder()
+                                .datasetName(dataset.name())
+                                .promptVersion(null)
+                                .promptVersions(List.of(
+                                        Experiment.PromptVersionLink.builder()
+                                                .promptId(promptVersion.promptId())
+                                                .id(promptVersion.id())
+                                                .commit(promptVersion.commit())
+                                                .build()))
+                                .build();
+
+                        createAndAssert(
+                                experiment,
+                                apiKey,
+                                workspaceName);
+
+                        experiment = getExperiment(apiKey, workspaceName, experiment);
+
+                        return dataset.toBuilder()
+                                .experimentCount(1L)
+                                .lastCreatedExperimentAt(experiment.createdAt())
+                                .mostRecentExperimentAt(experiment.createdAt())
+                                .build();
+                    })
+                    .sorted(Comparator.comparing(Dataset::id))
+                    .toList();
+
+            var actualEntity = datasetResourceClient.getDatasetPage(apiKey, workspaceName, expectedDatasets.size(),
+                    promptVersion);
 
             findAndAssertPage(actualEntity, expectedDatasets.size(), expectedDatasets.size(), 1,
                     expectedDatasets.reversed());
@@ -2769,18 +2844,16 @@ class DatasetsResourceTest {
             return Stream.of(
                     arguments(factory.manufacturePojo(DatasetItemBatch.class).toBuilder()
                             .items(List.of(factory.manufacturePojo(DatasetItem.class).toBuilder()
-                                    .input(null)
                                     .data(null)
                                     .build()))
                             .build(),
-                            "items[0].input must provide either input or data field"),
+                            "items[0].data must not be empty"),
                     arguments(factory.manufacturePojo(DatasetItemBatch.class).toBuilder()
                             .items(List.of(factory.manufacturePojo(DatasetItem.class).toBuilder()
-                                    .input(null)
                                     .data(Map.of())
                                     .build()))
                             .build(),
-                            "items[0].input must provide either input or data field"),
+                            "items[0].data must not be empty"),
                     arguments(factory.manufacturePojo(DatasetItemBatch.class).toBuilder()
                             .items(List.of(factory.manufacturePojo(DatasetItem.class).toBuilder()
                                     .source(null)
@@ -2971,41 +3044,6 @@ class DatasetsResourceTest {
                         "span workspace and dataset item workspace does not match");
             }
         }
-
-        @Test
-        @DisplayName("when data is null, the accept the request")
-        void create__whenDataIsNull__thenAcceptTheRequest() {
-            var item = factory.manufacturePojo(DatasetItem.class).toBuilder()
-                    .data(null)
-                    .build();
-
-            var batch = factory.manufacturePojo(DatasetItemBatch.class).toBuilder()
-                    .items(List.of(item))
-                    .datasetId(null)
-                    .build();
-
-            putAndAssert(batch, TEST_WORKSPACE, API_KEY);
-
-            getItemAndAssert(item, TEST_WORKSPACE, API_KEY);
-        }
-
-        @Test
-        @DisplayName("when input is null but data is present, the accept the request")
-        void create__whenInputIsNullButDataIsPresent__thenAcceptTheRequest() {
-            var item = factory.manufacturePojo(DatasetItem.class).toBuilder()
-                    .input(null)
-                    .build();
-
-            var batch = factory.manufacturePojo(DatasetItemBatch.class).toBuilder()
-                    .items(List.of(item))
-                    .datasetId(null)
-                    .build();
-
-            putAndAssert(batch, TEST_WORKSPACE, API_KEY);
-
-            getItemAndAssert(item, TEST_WORKSPACE, API_KEY);
-        }
-
     }
 
     private UUID createTrace(Trace trace, String apiKey, String workspaceName) {
@@ -3159,7 +3197,6 @@ class DatasetsResourceTest {
             var items = IntStream.range(0, 1000)
                     .mapToObj(i -> factory.manufacturePojo(DatasetItem.class).toBuilder()
                             .experimentItems(null)
-                            .metadata(null)
                             .createdAt(null)
                             .lastUpdatedAt(null)
                             .build())
@@ -3231,8 +3268,6 @@ class DatasetsResourceTest {
         Map<String, JsonNode> data = Optional.ofNullable(expectedDatasetItem.data())
                 .orElse(Map.of());
 
-        expectedDatasetItem = mergeInputMap(expectedDatasetItem, data);
-
         assertThat(actualEntity.id()).isEqualTo(expectedDatasetItem.id());
         assertThat(actualEntity).usingRecursiveComparison()
                 .ignoringFields(IGNORED_FIELDS_DATA_ITEM)
@@ -3240,37 +3275,6 @@ class DatasetsResourceTest {
 
         assertThat(actualEntity.createdAt()).isInThePast();
         assertThat(actualEntity.lastUpdatedAt()).isInThePast();
-    }
-
-    private DatasetItem mergeInputMap(DatasetItem expectedDatasetItem, Map<String, JsonNode> data) {
-
-        Map<String, JsonNode> newMap = new HashMap<>();
-
-        if (expectedDatasetItem.expectedOutput() != null) {
-            newMap.put("expected_output", expectedDatasetItem.expectedOutput());
-        }
-
-        if (expectedDatasetItem.input() != null) {
-            newMap.put("input", expectedDatasetItem.input());
-        }
-
-        if (expectedDatasetItem.metadata() != null) {
-            newMap.put("metadata", expectedDatasetItem.metadata());
-        }
-
-        Map<String, JsonNode> mergedMap = Stream
-                .concat(data.entrySet().stream(), newMap.entrySet().stream())
-                .collect(toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue,
-                        (v1, v2) -> v2 // In case of conflict, use the value from map2
-                ));
-
-        expectedDatasetItem = expectedDatasetItem.toBuilder()
-                .data(new HashMap<>(mergedMap))
-                .build();
-
-        return expectedDatasetItem;
     }
 
     @Nested
@@ -3392,7 +3396,7 @@ class DatasetsResourceTest {
                     .map(DatasetItem::data)
                     .toList();
 
-            Set<Column> columns = addDeprecatedFields(data);
+            Set<Column> columns = getColumns(data);
 
             putAndAssert(batch, TEST_WORKSPACE, API_KEY);
 
@@ -3432,7 +3436,7 @@ class DatasetsResourceTest {
                     .map(DatasetItem::data)
                     .toList();
 
-            Set<Column> columns = addDeprecatedFields(data);
+            Set<Column> columns = getColumns(data);
 
             putAndAssert(batch, TEST_WORKSPACE, API_KEY);
 
@@ -3473,7 +3477,10 @@ class DatasetsResourceTest {
 
             var updatedItems = items
                     .stream()
-                    .map(item -> item.toBuilder().input(factory.manufacturePojo(JsonNode.class)).build())
+                    .map(item -> item.toBuilder()
+                            .data(Map.of(factory.manufacturePojo(String.class),
+                                    factory.manufacturePojo(JsonNode.class)))
+                            .build())
                     .toList();
 
             var updatedBatch = batch.toBuilder()
@@ -3487,7 +3494,7 @@ class DatasetsResourceTest {
                     .map(DatasetItem::data)
                     .toList();
 
-            Set<Column> columns = addDeprecatedFields(data);
+            Set<Column> columns = getColumns(data);
 
             try (var actualResponse = client.target(BASE_RESOURCE_URI.formatted(baseURI))
                     .path(datasetId.toString())
@@ -3543,7 +3550,7 @@ class DatasetsResourceTest {
                     .map(DatasetItem::data)
                     .toList();
 
-            Set<Column> columns = addDeprecatedFields(data);
+            Set<Column> columns = getColumns(data);
 
             putAndAssert(batch, TEST_WORKSPACE, API_KEY);
 
@@ -3586,7 +3593,7 @@ class DatasetsResourceTest {
                     .map(DatasetItem::data)
                     .toList();
 
-            Set<Column> columns = addDeprecatedFields(data);
+            Set<Column> columns = getColumns(data);
 
             putAndAssert(batch, TEST_WORKSPACE, API_KEY);
 
@@ -3645,8 +3652,6 @@ class DatasetsResourceTest {
             Map<String, JsonNode> data = Optional.ofNullable(expectedDatasetItem.data())
                     .orElse(Map.of());
 
-            expectedDatasetItem = mergeInputMap(expectedDatasetItem, data);
-
             assertThat(actualDatasetItem.data()).isEqualTo(expectedDatasetItem.data());
         }
     }
@@ -3701,6 +3706,12 @@ class DatasetsResourceTest {
                     .build();
 
             createScoreAndAssert(feedbackScoreBatch, apiKey, workspaceName);
+
+            // Add comments to random trace
+            List<Comment> expectedComments = IntStream.range(0, 5)
+                    .mapToObj(i -> traceResourceClient.generateAndCreateComment(trace1.id(), apiKey, workspaceName,
+                            201))
+                    .toList();
 
             // Creating a trace without input, output and scores
             var traceMissingFields = factory.manufacturePojo(Trace.class).toBuilder()
@@ -3783,7 +3794,7 @@ class DatasetsResourceTest {
                     .map(DatasetItem::data)
                     .toList();
 
-            Set<Column> columns = addDeprecatedFields(data);
+            Set<Column> columns = getColumns(data);
 
             var page = 1;
             var pageSize = 5;
@@ -3831,7 +3842,8 @@ class DatasetsResourceTest {
                             .containsExactlyElementsOf(expectedExperimentItems);
 
                     for (var j = 0; j < actualDatasetItem.experimentItems().size(); j++) {
-                        var actualExperimentItem = actualDatasetItem.experimentItems().get(j);
+                        var actualExperimentItem = assertFeedbackScoresIgnoredFieldsAndSetThemToNull(
+                                actualDatasetItem.experimentItems().get(j), USER);
                         var expectedExperimentItem = expectedExperimentItems.get(j);
 
                         assertThat(actualExperimentItem.feedbackScores())
@@ -3849,6 +3861,14 @@ class DatasetsResourceTest {
                                 .isEqualTo(USER);
                         assertThat(actualExperimentItem.lastUpdatedBy())
                                 .isEqualTo(USER);
+
+                        // Check comments
+                        if (actualExperimentItem.traceId().equals(trace1.id())) {
+                            assertThat(expectedComments)
+                                    .usingRecursiveComparison()
+                                    .ignoringFields(IGNORED_FIELDS_COMMENTS)
+                                    .isEqualTo(actualExperimentItem.comments());
+                        }
                     }
 
                     assertThat(actualDatasetItem.createdAt()).isAfter(expectedDatasetItem.createdAt());
@@ -3901,7 +3921,7 @@ class DatasetsResourceTest {
                             .traceId(traces.get(i).id())
                             .datasetItemId(datasetItemBatchWithImage.items().get(i).id()).build())
                     .toList();
-            PodamFactoryUtils.manufacturePojoList(factory, ExperimentItem.class);
+
             var experimentItemsBatch = ExperimentItemsBatch.builder()
                     .experimentItems(Set.copyOf(experimentItems)).build();
 
@@ -3956,7 +3976,7 @@ class DatasetsResourceTest {
         @ValueSource(strings = {"[wrong_payload]", "[0191377d-06ee-7026-8f63-cc5309d1f54b]"})
         void findInvalidExperimentIds(String experimentIds) {
             var expectedErrorMessage = new io.dropwizard.jersey.errors.ErrorMessage(
-                    400, "Invalid query param experiment ids '%s'".formatted(experimentIds));
+                    400, "Invalid query param ids '%s'".formatted(experimentIds));
 
             var datasetId = GENERATOR.generate();
             try (var actualResponse = client.target(BASE_RESOURCE_URI.formatted(baseURI))
@@ -4015,7 +4035,7 @@ class DatasetsResourceTest {
                     apiKey,
                     workspaceName);
 
-            Set<Column> columns = addDeprecatedFields(items.stream().map(DatasetItem::data).toList());
+            Set<Column> columns = getColumns(items.stream().map(DatasetItem::data).toList());
 
             List<Filter> filters = List.of(ExperimentsComparisonFilter.builder()
                     .type(FieldType.STRING)
@@ -4098,7 +4118,7 @@ class DatasetsResourceTest {
                     apiKey,
                     workspaceName);
 
-            Set<Column> columns = addDeprecatedFields(datasetItems.stream().map(DatasetItem::data).toList());
+            Set<Column> columns = getColumns(datasetItems.stream().map(DatasetItem::data).toList());
 
             List<Filter> filters = List.of(filter);
 
@@ -4164,9 +4184,11 @@ class DatasetsResourceTest {
                         .experimentId(experimentId)
                         .input(trace.input())
                         .output(trace.output())
-                        .feedbackScores(Stream.of(score)
-                                .map(FeedbackScoreMapper.INSTANCE::toFeedbackScore)
-                                .toList())
+                        .feedbackScores(score == null
+                                ? null
+                                : Stream.of(score)
+                                        .map(FeedbackScoreMapper.INSTANCE::toFeedbackScore)
+                                        .toList())
                         .build();
 
                 experimentItems.add(experimentItem);
@@ -4195,8 +4217,8 @@ class DatasetsResourceTest {
                 var item = items.get(i);
                 var trace = Trace.builder()
                         .id(GENERATOR.generate())
-                        .input(item.input())
-                        .output(item.expectedOutput())
+                        .input(item.data().get("input"))
+                        .output(item.data().get("expected_output"))
                         .projectName(projectName)
                         .startTime(Instant.now())
                         .name("trace-" + i)
@@ -4212,30 +4234,38 @@ class DatasetsResourceTest {
                 if (i == 0) {
                     DatasetItem item = factory.manufacturePojo(DatasetItem.class)
                             .toBuilder()
-                            .input(JsonUtils
-                                    .getJsonNodeFromString(JsonUtils.writeValueAsString(Map.of("input", "sql_cost"))))
-                            .expectedOutput(JsonUtils
-                                    .getJsonNodeFromString(JsonUtils.writeValueAsString(Map.of("output", "sql_cost"))))
-                            .metadata(JsonUtils
-                                    .getJsonNodeFromString(JsonUtils.writeValueAsString(Map.of("sql_cost", 10))))
                             .source(DatasetItemSource.SDK)
-                            .data(Map.of(
-                                    "sql_tag", JsonUtils.readTree("sql_test"),
-                                    "sql_rate", JsonUtils.readTree(100),
-                                    "meta_field", JsonUtils.readTree(Map.of("version", new String[]{"10", "11", "12"})),
-                                    "releases", JsonUtils.readTree(
+                            .data(new HashMap<>() {
+                                {
+                                    put("sql_tag", JsonUtils.readTree("sql_test"));
+                                    put("sql_rate", JsonUtils.readTree(100));
+                                    put("input", JsonUtils
+                                            .getJsonNodeFromString(
+                                                    JsonUtils.writeValueAsString(Map.of("input", "sql_cost"))));
+                                    put("expected_output", JsonUtils
+                                            .getJsonNodeFromString(
+                                                    JsonUtils.writeValueAsString(Map.of("output", "sql_cost"))));
+                                    put("metadata", JsonUtils
+                                            .getJsonNodeFromString(
+                                                    JsonUtils.writeValueAsString(Map.of("sql_cost", 10))));
+                                    put("meta_field",
+                                            JsonUtils.readTree(Map.of("version", new String[]{"10", "11", "12"})));
+                                    put("releases", JsonUtils.readTree(
                                             List.of(
                                                     Map.of("fixes", new String[]{"10", "11", "12"}, "version", "1.0"),
                                                     Map.of("fixes", new String[]{"10", "11", "12"}, "version", "1.1"),
-                                                    Map.of("fixes", new String[]{"10", "45", "30"}, "version", "1.2"))),
-                                    "json_node", JsonUtils.readTree(Map.of("test", "1233", "test2", "12338")),
-                                    RandomStringUtils.randomAlphanumeric(5),
-                                    BigIntegerNode.valueOf(new BigInteger("18446744073709551615")),
-                                    RandomStringUtils.randomAlphanumeric(5), DoubleNode.valueOf(132432432.79995),
-                                    RandomStringUtils.randomAlphanumeric(5),
-                                    DoubleNode.valueOf(1.1844674407370955444555),
-                                    RandomStringUtils.randomAlphanumeric(5), IntNode.valueOf(100000000),
-                                    RandomStringUtils.randomAlphanumeric(5), BooleanNode.valueOf(true)))
+                                                    Map.of("fixes", new String[]{"10", "45", "30"}, "version",
+                                                            "1.2"))));
+                                    put("json_node", JsonUtils.readTree(Map.of("test", "1233", "test2", "12338")));
+                                    put(RandomStringUtils.randomAlphanumeric(5),
+                                            BigIntegerNode.valueOf(new BigInteger("18446744073709551615")));
+                                    put(RandomStringUtils.randomAlphanumeric(5), DoubleNode.valueOf(132432432.79995));
+                                    put(RandomStringUtils.randomAlphanumeric(5),
+                                            DoubleNode.valueOf(1.1844674407370955444555));
+                                    put(RandomStringUtils.randomAlphanumeric(5), IntNode.valueOf(100000000));
+                                    put(RandomStringUtils.randomAlphanumeric(5), BooleanNode.valueOf(true));
+                                }
+                            })
                             .traceId(null)
                             .spanId(null)
                             .build();
@@ -4260,6 +4290,83 @@ class DatasetsResourceTest {
                 assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(204);
                 assertThat(actualResponse.hasEntity()).isFalse();
             }
+        }
+
+        @Test
+        void find__whenFilteringFeedbackScoresEmpty__thenReturnMatchingRows() {
+            var workspaceName = UUID.randomUUID().toString();
+            var apiKey = UUID.randomUUID().toString();
+            var workspaceId = UUID.randomUUID().toString();
+
+            mockTargetWorkspace(apiKey, workspaceName, workspaceId);
+
+            var dataset = factory.manufacturePojo(Dataset.class);
+            var datasetId = createAndAssert(dataset, apiKey, workspaceName);
+
+            List<DatasetItem> datasetItems = new ArrayList<>();
+            createDatasetItems(datasetItems);
+            var batch = DatasetItemBatch.builder()
+                    .items(datasetItems)
+                    .datasetId(datasetId)
+                    .build();
+            putAndAssert(batch, workspaceName, apiKey);
+
+            String projectName = RandomStringUtils.randomAlphanumeric(20);
+            List<Trace> traces = new ArrayList<>();
+            createTraces(datasetItems, projectName, workspaceName, apiKey, traces);
+
+            UUID experimentId = GENERATOR.generate();
+
+            List<FeedbackScoreBatchItem> scores = new ArrayList<>();
+            createScores(traces.subList(0, traces.size() - 1), projectName, scores);
+            scores = scores.stream()
+                    .map(score -> score.toBuilder()
+                            .name(factory.manufacturePojo(String.class))
+                            .build())
+                    .toList();
+            createScoreAndAssert(new FeedbackScoreBatch(scores), apiKey, workspaceName);
+
+            List<ExperimentItem> experimentItems = new ArrayList<>();
+            createExperimentItems(datasetItems, traces, Stream.concat(scores.stream(),
+                    Stream.of((FeedbackScoreBatchItem) null)).collect(Collectors.toList()),
+                    experimentId, experimentItems);
+
+            createAndAssert(
+                    ExperimentItemsBatch.builder()
+                            .experimentItems(Set.copyOf(experimentItems))
+                            .build(),
+                    apiKey,
+                    workspaceName);
+
+            Set<Column> columns = getColumns(datasetItems.stream().map(DatasetItem::data).toList());
+
+            var isNotEmptyFilter = List.of(
+                    ExperimentsComparisonFilter.builder()
+                            .field(ExperimentsComparisonValidKnownField.FEEDBACK_SCORES.getQueryParamField())
+                            .operator(Operator.IS_NOT_EMPTY)
+                            .key(scores.getFirst().name())
+                            .value("")
+                            .build());
+
+            var actualPageIsNotEmpty = assertDatasetExperimentPage(datasetId, experimentId, isNotEmptyFilter, apiKey,
+                    workspaceName, columns, List.of(datasetItems.getFirst()));
+
+            assertDatasetItemExperiments(actualPageIsNotEmpty, List.of(datasetItems.getFirst()),
+                    List.of(experimentItems.getFirst()));
+
+            var isEmptyFilter = List.of(
+                    ExperimentsComparisonFilter.builder()
+                            .field(ExperimentsComparisonValidKnownField.FEEDBACK_SCORES.getQueryParamField())
+                            .operator(Operator.IS_EMPTY)
+                            .key(scores.getFirst().name())
+                            .value("")
+                            .build());
+
+            var actualPageIsEmpty = assertDatasetExperimentPage(datasetId, experimentId, isEmptyFilter, apiKey,
+                    workspaceName, columns, datasetItems.subList(1, datasetItems.size()).reversed());
+
+            assertDatasetItemExperiments(actualPageIsEmpty, datasetItems.subList(1, datasetItems.size()).reversed(),
+                    experimentItems.subList(1, datasetItems.size()).reversed());
         }
 
         @ParameterizedTest
@@ -4464,7 +4571,8 @@ class DatasetsResourceTest {
                 : URLEncoder.encode(JsonUtils.writeValueAsString(filters), StandardCharsets.UTF_8);
     }
 
-    private DatasetItemPage assertDatasetExperimentPage(UUID datasetId, UUID experimentId, List<Filter> filters,
+    private DatasetItemPage assertDatasetExperimentPage(UUID datasetId, UUID experimentId,
+            List<? extends Filter> filters,
             String apiKey, String workspaceName, Set<Column> columns, List<DatasetItem> datasetItems) {
         try (var actualResponse = client.target(BASE_RESOURCE_URI.formatted(baseURI))
                 .path(datasetId.toString())
@@ -4726,65 +4834,7 @@ class DatasetsResourceTest {
                 .collect(toSet());
     }
 
-    @Nested
-    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-    //TODO: Remove this test class after migration to the new dataset item format
-    class TestNoMigratedDatasetItemRetrieval {
-
-        private DatasetItem datasetItem;
-
-        @BeforeEach
-        void setUp() {
-
-            var datasetId = createAndAssert(factory.manufacturePojo(Dataset.class));
-            var clickhouseConnectionFactory = ClickHouseContainerUtils.newDatabaseAnalyticsFactory(
-                    CLICKHOUSE, DATABASE_NAME).build();
-
-            var datasetItem = factory.manufacturePojo(DatasetItem.class);
-
-            Mono.from(clickhouseConnectionFactory.create())
-                    .flatMap(connection -> Mono.from(connection.createStatement("""
-                            INSERT INTO %s.%s (
-                            id,
-                            input,
-                            expected_output,
-                            metadata,
-                            source,
-                            dataset_id,
-                            workspace_id
-                            ) VALUES (:id, :input, :expected_output, :metadata, :source, :dataset_id, :workspace_id)
-                            """.formatted(DATABASE_NAME, "dataset_items"))
-                            .bind("id", datasetItem.id())
-                            .bind("input", datasetItem.input().toString())
-                            .bind("expected_output", datasetItem.expectedOutput().toString())
-                            .bind("metadata", datasetItem.metadata().toString())
-                            .bind("source", DatasetItemSource.SDK.getValue())
-                            .bind("dataset_id", datasetId)
-                            .bind("workspace_id", WORKSPACE_ID)
-                            .execute()))
-                    .block();
-
-            this.datasetItem = datasetItem;
-        }
-
-        @Test
-        void findById__whenDatasetItemNotMigrated__thenReturnDatasetItemWithData() {
-
-            var item = datasetItem.toBuilder()
-                    .spanId(null)
-                    .traceId(null)
-                    .experimentItems(null)
-                    .source(DatasetItemSource.SDK)
-                    .data(Map.of("input", datasetItem.input(),
-                            "expected_output", datasetItem.expectedOutput(),
-                            "metadata", datasetItem.metadata()))
-                    .build();
-
-            getItemAndAssert(item, TEST_WORKSPACE, API_KEY);
-        }
-    }
-
-    private Set<Column> addDeprecatedFields(List<Map<String, JsonNode>> data) {
+    private Set<Column> getColumns(List<Map<String, JsonNode>> data) {
 
         HashSet<Column> columns = data
                 .stream()
@@ -4796,12 +4846,6 @@ class DatasetsResourceTest {
                         .filterFieldPrefix("data")
                         .build())
                 .collect(Collectors.toCollection(HashSet::new));
-
-        columns.add(Column.builder().name("input").types(Set.of(ColumnType.OBJECT)).filterFieldPrefix("data").build());
-        columns.add(Column.builder().name("expected_output").types(Set.of(ColumnType.OBJECT)).filterFieldPrefix("data")
-                .build());
-        columns.add(
-                Column.builder().name("metadata").types(Set.of(ColumnType.OBJECT)).filterFieldPrefix("data").build());
 
         Map<String, Set<ColumnType>> results = columns.stream()
                 .collect(groupingBy(Column::name, mapping(Column::types, flatMapping(Set::stream, toSet()))));
@@ -4840,7 +4884,14 @@ class DatasetsResourceTest {
                     .ignoringFields(IGNORED_FIELDS_LIST)
                     .isEqualTo(experimentItems.get(i));
 
-            var actualFeedbackScores = actualExperimentItems.getFirst().feedbackScores();
+            var actualFeedbackScores = assertFeedbackScoresIgnoredFieldsAndSetThemToNull(
+                    actualExperimentItems.getFirst(), USER).feedbackScores();
+
+            if (ListUtils.emptyIfNull(experimentItems.get(i).feedbackScores()).isEmpty()) {
+                assertThat(actualFeedbackScores).isNull();
+                continue;
+            }
+
             assertThat(actualFeedbackScores).hasSize(1);
 
             assertThat(actualFeedbackScores.getFirst())
@@ -4916,5 +4967,4 @@ class DatasetsResourceTest {
 
         return items;
     }
-
 }

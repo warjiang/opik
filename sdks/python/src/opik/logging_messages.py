@@ -1,3 +1,6 @@
+# Storing all the messages in this module is considered a deprecated practice.
+# Do it only if your message is used in more than one place.
+
 METADATA_KEY_COLLISION_DURING_DEEPMERGE = (
     "Trace or span metadata value for the sub-key '%s' was overwritten from '%s' to '%s' during the deep merge",
 )
@@ -14,6 +17,10 @@ FAILED_TO_EXTRACT_TOKEN_USAGE_FROM_PRESUMABLY_LANGCHAIN_OPENAI_LLM_RUN = (
     "Failed to extract token usage from presumably OpenAI LLM langchain run."
 )
 
+FAILED_TO_EXTRACT_TOKEN_USAGE_FROM_PRESUMABLY_LANGCHAIN_GOOGLE_LLM_RUN = (
+    "Failed to extract token usage from presumably Google LLM langchain run."
+)
+
 UNEXPECTED_EXCEPTION_ON_SPAN_CREATION_FOR_TRACKED_FUNCTION = "Unexpected exception happened when tried to create a span for function %s.\nInputs: %s\nError message: %s"
 
 UNEXPECTED_EXCEPTION_ON_SPAN_FINALIZATION_FOR_TRACKED_FUNCTION = "Unexpected exception happened when tried to finalize span.\nOutput: %s\nError message: %s"
@@ -22,9 +29,7 @@ FAILED_TO_AGGREGATE_GENERATORS_YIELDED_VALUES_WITH_PROVIDED_AGGREGATOR_IN_TRACKE
 
 FAILED_TO_PARSE_OPENAI_STREAM_CONTENT = "Failed to parse openai Stream content. %s"
 
-FAILED_TO_PROCESS_MESSAGE_IN_BACKGROUND_STREAMER = (
-    "Failed to process %s. Content: %s, Error: %s"
-)
+FAILED_TO_PROCESS_MESSAGE_IN_BACKGROUND_STREAMER = "Failed to process %s. Error: %s"
 
 HALLUCINATION_DETECTION_FAILED = "Failed hallucination detection"
 
@@ -52,3 +57,10 @@ PARSE_API_KEY_EMPTY_EXPECTED_ATTRIBUTES = (
 )
 
 PARSE_API_KEY_TOO_MANY_PARTS = "Too many parts (%d) found in the Opik API key: %r"
+
+LLM_PROVIDER_RATE_LIMIT_ERROR_DETECTED_IN_EVALUATE_FUNCTION = "LLM provider rate limit error detected. We recommend reducing the amount of parallel requests by setting `task_threads` evaluation parameter to a smaller number"
+
+WARNING_TOKEN_USAGE_DATA_IS_NOT_AVAILABLE = "You didn't specify argument `stream_usage`=True during LLM initialization. Token usage data is not available for .stream() or .astream() methods."
+
+# Storing all the messages in this module is considered a deprecated practice.
+# Do it only if your message is used in more than one place.

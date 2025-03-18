@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
+import { Info, Pencil } from "lucide-react";
+import { StringParam, useQueryParam } from "use-query-params";
 
 import { Button } from "@/components/ui/button";
-import { Info, Pencil } from "lucide-react";
 import { PromptWithLatestVersion } from "@/types/prompts";
 import Loader from "@/components/shared/Loader/Loader";
-import usePromptVersionsById from "@/api/prompts/usePromptVersionsById";
+import CodeHighlighter, {
+  SUPPORTED_LANGUAGE,
+} from "@/components/shared/CodeHighlighter/CodeHighlighter";
 import UseThisPromptDialog from "@/components/pages/PromptPage/PromptTab/UseThisPromptDialog";
-import EditPromptDialog from "@/components/pages/PromptPage/PromptTab/EditPromptDialog";
+import EditPromptVersionDialog from "@/components/pages/PromptPage/PromptTab/EditPromptVersionDialog";
 import CommitHistory from "@/components/pages/PromptPage/PromptTab/CommitHistory";
+import usePromptVersionsById from "@/api/prompts/usePromptVersionsById";
 import usePromptVersionById from "@/api/prompts/usePromptVersionById";
-import { StringParam, useQueryParam } from "use-query-params";
 
 interface PromptTabInterface {
   prompt?: PromptWithLatestVersion;
@@ -74,27 +77,54 @@ const PromptTab = ({ prompt }: PromptTabInterface) => {
     <>
       <div>
         <div className="flex w-full items-center">
-          <Button variant="outline" onClick={() => setOpenUseThisPrompt(true)}>
-            <Info className="mr-2 size-4" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setOpenUseThisPrompt(true)}
+          >
+            <Info className="mr-2 size-3.5" />
             Use this prompt
           </Button>
 
           <Button
             className="ml-auto"
             variant="secondary"
+            size="sm"
             onClick={() => handleOpenEditPrompt(true)}
           >
-            <Pencil className="mr-2 size-4" />
+            <Pencil className="mr-2 size-3.5" />
             Edit prompt
           </Button>
         </div>
 
-        <div className="mt-6 flex gap-2 rounded-md border bg-white p-6">
-          <div className="flex grow flex-col">
+        <div className="mt-6 flex gap-6 rounded-md border bg-white p-6">
+          <div className="flex grow flex-col gap-2">
             <p className="comet-body-s-accented text-foreground">Prompt</p>
-            <code className="comet-code mt-2 flex w-full whitespace-pre-wrap break-all rounded-md bg-primary-foreground p-3">
+            <code className="comet-code flex w-full whitespace-pre-wrap break-all rounded-md bg-primary-foreground p-3">
               {activeVersion?.template}
             </code>
+            {activeVersion?.metadata && (
+              <>
+                <p className="comet-body-s-accented mt-4 text-foreground">
+                  Metadata
+                </p>
+                <CodeHighlighter
+                  data={JSON.stringify(activeVersion.metadata, null, 2)}
+                  language={SUPPORTED_LANGUAGE.json}
+                />
+              </>
+            )}
+
+            {activeVersion?.change_description && (
+              <>
+                <p className="comet-body-s-accented mt-4 text-foreground">
+                  Commit message
+                </p>
+                <div className="comet-body-s flex w-full whitespace-pre-wrap break-all rounded-md bg-primary-foreground p-3">
+                  {activeVersion.change_description}
+                </div>
+              </>
+            )}
           </div>
           <div className="min-w-[320px]">
             <p className="comet-body-s-accented mb-2 text-foreground">
@@ -116,12 +146,13 @@ const PromptTab = ({ prompt }: PromptTabInterface) => {
         promptName={prompt.name}
       />
 
-      <EditPromptDialog
+      <EditPromptVersionDialog
         key={editPromptResetKeyRef.current}
         open={openEditPrompt}
         setOpen={handleOpenEditPrompt}
         promptName={prompt.name}
-        promptTemplate={activeVersion?.template || ""}
+        template={activeVersion?.template || ""}
+        metadata={activeVersion?.metadata}
         onSetActiveVersionId={setActiveVersionId}
       />
     </>

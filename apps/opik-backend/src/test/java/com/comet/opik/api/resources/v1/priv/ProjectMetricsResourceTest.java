@@ -2,10 +2,10 @@ package com.comet.opik.api.resources.v1.priv;
 
 import com.comet.opik.api.DataPoint;
 import com.comet.opik.api.FeedbackScoreBatchItem;
+import com.comet.opik.api.ReactServiceErrorResponse;
 import com.comet.opik.api.Span;
 import com.comet.opik.api.TimeInterval;
 import com.comet.opik.api.Trace;
-import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.metrics.MetricType;
 import com.comet.opik.api.metrics.ProjectMetricRequest;
 import com.comet.opik.api.metrics.ProjectMetricResponse;
@@ -23,7 +23,9 @@ import com.comet.opik.api.resources.utils.resources.SpanResourceClient;
 import com.comet.opik.api.resources.utils.resources.TraceResourceClient;
 import com.comet.opik.domain.ProjectMetricsDAO;
 import com.comet.opik.domain.ProjectMetricsService;
-import com.comet.opik.domain.cost.ModelPrice;
+import com.comet.opik.domain.cost.CostService;
+import com.comet.opik.extensions.DropwizardAppExtensionProvider;
+import com.comet.opik.extensions.RegisterApp;
 import com.comet.opik.infrastructure.DatabaseAnalyticsFactory;
 import com.comet.opik.podam.PodamFactoryUtils;
 import com.comet.opik.utils.JsonUtils;
@@ -45,7 +47,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EmptySource;
@@ -81,9 +83,11 @@ import java.util.stream.Stream;
 
 import static com.comet.opik.api.resources.utils.ClickHouseContainerUtils.DATABASE_NAME;
 import static com.comet.opik.api.resources.utils.MigrationUtils.CLICKHOUSE_CHANGELOG_FILE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.FAKE_API_KEY_MESSAGE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.NO_API_KEY_RESPONSE;
+import static com.comet.opik.api.resources.utils.TestHttpClientUtils.UNAUTHORIZED_RESPONSE;
 import static com.comet.opik.infrastructure.auth.RequestContext.SESSION_COOKIE;
 import static com.comet.opik.infrastructure.auth.RequestContext.WORKSPACE_HEADER;
-import static com.comet.opik.infrastructure.auth.TestHttpClientUtils.UNAUTHORIZED_RESPONSE;
 import static com.github.tomakehurst.wiremock.client.WireMock.equalTo;
 import static com.github.tomakehurst.wiremock.client.WireMock.matching;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
@@ -96,6 +100,7 @@ import static org.junit.jupiter.params.provider.Arguments.arguments;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @DisplayName("Project Metrics Resource Test")
+@ExtendWith(DropwizardAppExtensionProvider.class)
 class ProjectMetricsResourceTest {
     public static final String URL_TEMPLATE = "%s/v1/private/projects/%s/metrics";
 
@@ -109,16 +114,15 @@ class ProjectMetricsResourceTest {
     private static final int TIME_BUCKET_3 = 3;
     private static final int TIME_BUCKET_1 = 1;
 
-    private static final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
-    private static final ClickHouseContainer CLICKHOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
-    private static final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
+    private final RedisContainer REDIS = RedisContainerUtils.newRedisContainer();
+    private final ClickHouseContainer CLICKHOUSE_CONTAINER = ClickHouseContainerUtils.newClickHouseContainer();
+    private final MySQLContainer<?> MYSQL = MySQLContainerUtils.newMySQLContainer();
+    private final WireMockUtils.WireMockRuntime wireMock;
 
-    @RegisterExtension
-    private static final TestDropwizardAppExtension app;
+    @RegisterApp
+    private final TestDropwizardAppExtension APP;
 
-    private static final WireMockUtils.WireMockRuntime wireMock;
-
-    static {
+    {
         Startables.deepStart(REDIS, CLICKHOUSE_CONTAINER, MYSQL).join();
 
         wireMock = WireMockUtils.startWireMock();
@@ -126,7 +130,7 @@ class ProjectMetricsResourceTest {
         DatabaseAnalyticsFactory databaseAnalyticsFactory = ClickHouseContainerUtils
                 .newDatabaseAnalyticsFactory(CLICKHOUSE_CONTAINER, DATABASE_NAME);
 
-        app = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
+        APP = TestDropwizardAppExtensionUtils.newTestDropwizardAppExtension(
                 MYSQL.getJdbcUrl(), databaseAnalyticsFactory, wireMock.runtimeInfo(), REDIS.getRedisURI());
     }
 
@@ -143,7 +147,7 @@ class ProjectMetricsResourceTest {
         MigrationUtils.runDbMigration(jdbi, MySQLContainerUtils.migrationParameters());
 
         try (var connection = CLICKHOUSE_CONTAINER.createConnection("")) {
-            MigrationUtils.runDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
+            MigrationUtils.runClickhouseDbMigration(connection, CLICKHOUSE_CHANGELOG_FILE,
                     ClickHouseContainerUtils.migrationParameters());
         }
 
@@ -158,7 +162,7 @@ class ProjectMetricsResourceTest {
         mockTargetWorkspace();
     }
 
-    private static void mockTargetWorkspace() {
+    private void mockTargetWorkspace() {
         AuthTestUtils.mockTargetWorkspace(wireMock.server(), API_KEY, WORKSPACE_NAME, WORKSPACE_ID, USER);
     }
 
@@ -176,9 +180,9 @@ class ProjectMetricsResourceTest {
 
         Stream<Arguments> credentials() {
             return Stream.of(
-                    arguments(API_KEY, true),
-                    arguments(fakeApikey, false),
-                    arguments("", false));
+                    arguments(API_KEY, true, null),
+                    arguments(fakeApikey, false, UNAUTHORIZED_RESPONSE),
+                    arguments("", false, NO_API_KEY_RESPONSE));
         }
 
         @BeforeEach
@@ -188,19 +192,17 @@ class ProjectMetricsResourceTest {
                     post(urlPathEqualTo("/opik/auth"))
                             .withHeader(HttpHeaders.AUTHORIZATION, equalTo(fakeApikey))
                             .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(WireMock.unauthorized()));
-
-            wireMock.server().stubFor(
-                    post(urlPathEqualTo("/opik/auth"))
-                            .withHeader(HttpHeaders.AUTHORIZATION, equalTo(""))
-                            .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(WireMock.unauthorized()));
+                            .willReturn(WireMock.unauthorized().withHeader("Content-Type", "application/json")
+                                    .withJsonBody(JsonUtils.readTree(
+                                            new ReactServiceErrorResponse(FAKE_API_KEY_MESSAGE,
+                                                    401)))));
         }
 
         @ParameterizedTest
         @MethodSource("credentials")
         @DisplayName("get project metrics: when api key is present, then return proper response")
-        void getProjectMetrics__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean isAuthorized) {
+        void getProjectMetrics__whenApiKeyIsPresent__thenReturnProperResponse(String apiKey, boolean isAuthorized,
+                io.dropwizard.jersey.errors.ErrorMessage errorMessage) {
             mockTargetWorkspace();
 
             var projectId = UUID.randomUUID();
@@ -225,7 +227,7 @@ class ProjectMetricsResourceTest {
                 } else {
                     assertThat(actualResponse.getStatusInfo().getStatusCode()).isEqualTo(HttpStatus.SC_UNAUTHORIZED);
                     assertThat(actualResponse.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class))
-                            .isEqualTo(UNAUTHORIZED_RESPONSE);
+                            .isEqualTo(errorMessage);
                 }
             }
         }
@@ -257,7 +259,10 @@ class ProjectMetricsResourceTest {
                     post(urlPathEqualTo("/opik/auth-session"))
                             .withCookie(SESSION_COOKIE, equalTo(fakeSessionToken))
                             .withRequestBody(matchingJsonPath("$.workspaceName", matching(".+")))
-                            .willReturn(WireMock.unauthorized()));
+                            .willReturn(WireMock.unauthorized().withHeader("Content-Type", "application/json")
+                                    .withJsonBody(JsonUtils.readTree(
+                                            new ReactServiceErrorResponse(FAKE_API_KEY_MESSAGE,
+                                                    401)))));
         }
 
         @ParameterizedTest
@@ -394,9 +399,10 @@ class ProjectMetricsResourceTest {
                 assertThat(response.getStatus()).isEqualTo(HttpStatus.SC_BAD_REQUEST);
                 assertThat(response.hasEntity()).isTrue();
 
-                var actualError = response.readEntity(ErrorMessage.class);
+                var actualError = response.readEntity(io.dropwizard.jersey.errors.ErrorMessage.class);
 
-                assertThat(actualError).isEqualTo(new ErrorMessage(List.of("Unable to process JSON")));
+                assertThat(actualError.getMessage()).startsWith(
+                        "Unable to process JSON. Cannot deserialize value of type `com.comet.opik.api.metrics.MetricType` from String \"non-existing-metric\"");
             }
         }
 
@@ -691,6 +697,7 @@ class ProjectMetricsResourceTest {
         private BigDecimal createSpans(
                 String projectName, Instant marker) {
             var MODEL_NAME = "gpt-3.5-turbo";
+            var provider = "openai";
 
             List<Trace> traces = IntStream.range(0, 5)
                     .mapToObj(i -> factory.manufacturePojo(Trace.class).toBuilder()
@@ -704,15 +711,18 @@ class ProjectMetricsResourceTest {
                     .map(trace -> factory.manufacturePojo(Span.class).toBuilder()
                             .projectName(projectName)
                             .model(MODEL_NAME)
+                            .provider(provider)
                             .usage(Map.of(
                                     "prompt_tokens", RANDOM.nextInt(),
                                     "completion_tokens", RANDOM.nextInt()))
                             .traceId(trace.id())
+                            .totalEstimatedCost(null)
                             .build())
                     .toList();
 
             spanResourceClient.batchCreateSpans(spans, API_KEY, WORKSPACE_NAME);
-            return spans.stream().map(span -> ModelPrice.fromString(MODEL_NAME).calculateCost(span.usage()))
+            return spans.stream()
+                    .map(span -> CostService.calculateCost(MODEL_NAME, provider, span.usage()))
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
         }
     }

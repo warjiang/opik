@@ -7,6 +7,7 @@ import com.comet.opik.api.error.EntityAlreadyExistsException;
 import com.comet.opik.api.error.ErrorMessage;
 import com.comet.opik.api.error.InvalidUUIDVersionException;
 import com.comet.opik.api.events.TracesCreated;
+import com.comet.opik.api.sorting.TraceSortingFactory;
 import com.comet.opik.infrastructure.auth.RequestContext;
 import com.comet.opik.infrastructure.db.TransactionTemplateAsync;
 import com.comet.opik.infrastructure.lock.LockService;
@@ -32,7 +33,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import static com.comet.opik.domain.ProjectService.DEFAULT_USER;
-import static com.comet.opik.domain.ProjectService.DEFAULT_WORKSPACE_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -52,10 +52,13 @@ class TraceServiceImplTest {
     private TraceDAO traceDao;
 
     @Mock
-    private SpanDAO spanDAO;
+    private SpanService spanService;
 
     @Mock
     private FeedbackScoreDAO feedbackScoreDAO;
+
+    @Mock
+    private CommentDAO commentDAO;
 
     @Mock
     private TransactionTemplateAsync template;
@@ -67,13 +70,15 @@ class TraceServiceImplTest {
     private EventBus eventBus;
 
     private final PodamFactory factory = new PodamFactoryImpl();
+    private final TraceSortingFactory traceSortingFactory = new TraceSortingFactory();
 
     @BeforeEach
     void setUp() {
         traceService = new TraceServiceImpl(
                 traceDao,
-                spanDAO,
+                spanService,
                 feedbackScoreDAO,
+                commentDAO,
                 template,
                 projectService,
                 () -> Generators.timeBasedEpochGenerator().generate(),
@@ -120,12 +125,12 @@ class TraceServiceImplTest {
                     .thenReturn(Mono.just(traceId));
 
             var actualResult = traceService.create(Trace.builder()
+                    .projectId(projectId)
                     .projectName(projectName)
                     .startTime(Instant.now())
                     .build())
                     .contextWrite(ctx -> ctx.put(RequestContext.USER_NAME, DEFAULT_USER)
-                            .put(RequestContext.WORKSPACE_ID, workspaceId)
-                            .put(RequestContext.WORKSPACE_NAME, DEFAULT_WORKSPACE_NAME))
+                            .put(RequestContext.WORKSPACE_ID, workspaceId))
                     .block();
 
             // then
@@ -175,8 +180,7 @@ class TraceServiceImplTest {
                             .projectName(projectName)
                             .build())
                     .contextWrite(ctx -> ctx.put(RequestContext.USER_NAME, DEFAULT_USER)
-                            .put(RequestContext.WORKSPACE_ID, workspaceId)
-                            .put(RequestContext.WORKSPACE_NAME, DEFAULT_WORKSPACE_NAME))
+                            .put(RequestContext.WORKSPACE_ID, workspaceId))
                     .block();
 
             // then
@@ -204,7 +208,8 @@ class TraceServiceImplTest {
             when(traceDao.find(anyInt(), anyInt(),
                     eq(TraceSearchCriteria.builder().projectId(projectId).build()),
                     any()))
-                    .thenReturn(Mono.just(new Trace.TracePage(1, 1, 1, List.of(trace))));
+                    .thenReturn(Mono.just(
+                            new Trace.TracePage(1, 1, 1, List.of(trace), traceSortingFactory.getSortableFields())));
 
             when(template.nonTransaction(any()))
                     .thenAnswer(invocation -> {

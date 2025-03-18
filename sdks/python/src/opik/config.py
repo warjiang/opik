@@ -10,7 +10,7 @@ import pydantic_settings
 from pydantic_settings import BaseSettings, InitSettingsSource
 from pydantic_settings.sources import ConfigFileSourceMixin
 
-from . import dict_utils
+from . import dict_utils, url_helpers
 from .api_key import opik_api_key
 
 PathType = Union[
@@ -22,10 +22,10 @@ PathType = Union[
 
 _SESSION_CACHE_DICT: Dict[str, Any] = {}
 
-MAX_BATCH_SIZE_MB = 50
+MAX_BATCH_SIZE_MB = 5
 
-OPIK_URL_CLOUD: Final[str] = "https://www.comet.com/opik/api"
-OPIK_URL_LOCAL: Final[str] = "http://localhost:5173/api"
+OPIK_URL_CLOUD: Final[str] = "https://www.comet.com/opik/api/"
+OPIK_URL_LOCAL: Final[str] = "http://localhost:5173/api/"
 
 OPIK_PROJECT_DEFAULT_NAME: Final[str] = "Default Project"
 OPIK_WORKSPACE_DEFAULT_NAME: Final[str] = "default"
@@ -124,7 +124,7 @@ class OpikConfig(pydantic_settings.BaseSettings):
     If it's not set - there is no timeout.
     """
 
-    background_workers: int = 8
+    background_workers: int = 4
     """
     The amount of background threads that submit data to the backend.
     """
@@ -158,10 +158,78 @@ class OpikConfig(pydantic_settings.BaseSettings):
     If enabled, TLS verification is enabled for all HTTP requests.
     """
 
+    track_disable: bool = False
+    """
+    If set to True, then `@track` decorator and `track_LIBRARY(...)` integrations do not log any data.
+    Any other API will continue working.
+    We do not recommend disable tracking unless you only use tracking functionalities in your project because
+    it might lead to unexpected results for the features that rely on spans/traces created.
+    """
+
+    sentry_enable: bool = True
+    """
+    If set to True, Opik will send the information about the errors to Sentry.
+    """
+
+    sentry_dsn: str = "https://18e4b84006b2ad4cb5df85f372b94dd0@o168229.ingest.us.sentry.io/4508620148441088"
+    """
+    Sentry project DSN which is used as a destination for sentry events.
+    In case there is a need to update reporting rules and stop receiving events from existing users,
+    current DSN should disabled in Sentry project settings, a new DSN should be created and placed here
+    instead of the old one.
+    """
+
+    enable_litellm_models_monitoring: bool = True
+    """
+    If set to True - Opik will create llm spans for LiteLLMChatModel calls.
+    It is mainly to be used in tests since litellm uses external Opik callback
+    which makes HTTP requests not via the opik package.
+    """
+
     @property
     def config_file_fullpath(self) -> pathlib.Path:
         config_file_path = os.getenv("OPIK_CONFIG_PATH", CONFIG_FILE_PATH_DEFAULT)
         return pathlib.Path(config_file_path).expanduser()
+
+    @property
+    def config_file_exists(self) -> bool:
+        """
+        Determines whether the configuration file exists at the specified path.
+        """
+        return self.config_file_fullpath.exists()
+
+    @property
+    def is_cloud_installation(self) -> bool:
+        """
+        Determine if the installation type is a cloud installation.
+        """
+        return url_helpers.get_base_url(self.url_override) == url_helpers.get_base_url(
+            OPIK_URL_CLOUD
+        )
+
+    @property
+    def is_localhost_installation(self) -> bool:
+        return "localhost" in self.url_override
+
+    @pydantic.model_validator(mode="after")
+    def _set_url_override_from_api_key(self) -> "OpikConfig":
+        url_was_not_provided = (
+            "url_override" not in self.model_fields_set or self.url_override is None
+        )
+        url_needs_configuration = self.api_key is not None and url_was_not_provided
+
+        if not url_needs_configuration:
+            return self
+
+        assert self.api_key is not None
+        opik_api_key_ = opik_api_key.parse_api_key(self.api_key)
+
+        if opik_api_key_ is not None and opik_api_key_.base_url is not None:
+            self.url_override = urllib.parse.urljoin(
+                opik_api_key_.base_url, "opik/api/"
+            )
+
+        return self
 
     def save_to_file(self) -> None:
         """
@@ -190,25 +258,123 @@ class OpikConfig(pydantic_settings.BaseSettings):
             LOGGER.error(f"Failed to save configuration: {e}")
             raise
 
-    @pydantic.model_validator(mode="after")
-    def _set_url_override_from_api_key(self) -> "OpikConfig":
-        url_was_not_provided = (
-            "url_override" not in self.model_fields_set or self.url_override is None
+    def as_dict(self, mask_api_key: bool) -> Dict[str, Any]:
+        """
+        Retrieves the current configuration with the API key value masked.
+        """
+        current_values = self.model_dump()
+        if current_values.get("api_key") is not None and mask_api_key:
+            current_values["api_key"] = "*** HIDDEN ***"
+        return current_values
+
+    def check_for_known_misconfigurations(
+        self, show_misconfiguration_message: bool = False
+    ) -> bool:
+        """
+        Attempts to detects if Opik is misconfigured and optionally displays
+        a corresponding error message.
+        Works only for Opik cloud and OSS localhost installations.
+
+        Parameters:
+        show_misconfiguration_message : A flag indicating whether to display detailed error messages if the configuration
+            is determined to be misconfigured. Defaults to False.
+        """
+
+        is_misconfigured_flag, error_message = (
+            self.get_misconfiguration_detection_results()
         )
-        url_needs_configuration = self.api_key is not None and url_was_not_provided
 
-        if not url_needs_configuration:
-            return self
+        if is_misconfigured_flag:
+            if show_misconfiguration_message:
+                print()
+                LOGGER.error(
+                    "========================\n"
+                    f"{error_message}\n"
+                    "==============================\n"
+                )
+            return True
 
-        assert self.api_key is not None
-        opik_api_key_ = opik_api_key.parse_api_key(self.api_key)
+        return False
 
-        if opik_api_key_ is not None and opik_api_key_.base_url is not None:
-            self.url_override = urllib.parse.urljoin(
-                opik_api_key_.base_url, "opik/api/"
+    def get_misconfiguration_detection_results(self) -> Tuple[bool, Optional[str]]:
+        """
+        Tries detecting misconfigurations for either cloud or localhost environments.
+        The detection will not work for any other kind of installation.
+
+        Returns:
+            Tuple[bool, Optional[str]]: A tuple where the first element indicates
+            whether the configuration is misconfigured (True for misconfigured, False for valid).
+            The second element is an optional string that contains
+            an error message if there is a configuration issue, or None if the
+            configuration is valid.
+        """
+        is_misconfigured_for_cloud_flag, error_message = (
+            self._is_misconfigured_for_cloud()
+        )
+        if is_misconfigured_for_cloud_flag:
+            return True, error_message
+
+        is_misconfigured_for_localhost_flag, error_message = (
+            self._is_misconfigured_for_localhost()
+        )
+        if is_misconfigured_for_localhost_flag:
+            return True, error_message
+
+        return False, None
+
+    def _is_misconfigured_for_cloud(self) -> Tuple[bool, Optional[str]]:
+        """
+        Determines if the current Opik configuration is misconfigured for cloud logging.
+
+        Returns:
+            Tuple[bool, Optional[str]]: A tuple where the first element is a boolean indicating if
+            the configuration is misconfigured for cloud logging, and the second element is either
+            an error message indicating the reason for misconfiguration or None.
+        """
+        api_key_configured = self.api_key is not None
+        tracking_disabled = self.track_disable
+
+        if (
+            self.is_cloud_installation
+            and (not api_key_configured)
+            and (not tracking_disabled)
+        ):
+            error_message = (
+                "The API key must be specified to log data to https://www.comet.com/opik.\n"
+                "You can use `opik configure` CLI command to configure your environment for logging.\n"
+                "See the configuration details in the docs: https://www.comet.com/docs/opik/tracing/sdk_configuration.\n"
             )
+            return True, error_message
 
-        return self
+        return False, None
+
+    def _is_misconfigured_for_localhost(self) -> Tuple[bool, Optional[str]]:
+        """
+        Determines if the current setup is misconfigured for a local open-source installation.
+
+        Returns:
+            Tuple[bool, Optional[str]]: A tuple where the first element is a boolean indicating if
+            the configuration is misconfigured for local logging, and the second element is either
+            an error message indicating the reason for misconfiguration or None.
+        """
+
+        workspace_is_default = self.workspace == OPIK_WORKSPACE_DEFAULT_NAME
+        tracking_disabled = self.track_disable
+
+        if (
+            self.is_localhost_installation
+            and (not workspace_is_default)
+            and (not tracking_disabled)
+        ):
+            error_message = (
+                "Open source installations do not support workspace specification. Only `default` is available.\n"
+                "See the configuration details in the docs: https://www.comet.com/docs/opik/tracing/sdk_configuration\n"
+                "If you need advanced workspace management - you may consider using our cloud offer (https://www.comet.com/site/pricing/)\n"
+                "or contact our team for purchasing and setting up a self-hosted installation.\n"
+            )
+            return True, error_message
+
+        return False, None
 
 
 def update_session_config(key: str, value: Any) -> None:

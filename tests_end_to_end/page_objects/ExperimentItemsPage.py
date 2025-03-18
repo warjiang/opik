@@ -5,9 +5,12 @@ import re
 class ExperimentItemsPage:
     def __init__(self, page: Page):
         self.page = page
-        self.next_page_button_locator = self.page.locator(
-            "div:has(> button:nth-of-type(4))"
-        ).locator("button:nth-of-type(3)")
+        self.next_page_button_locator = (
+            self.page.locator("div")
+            .filter(has_text=re.compile(r"^Showing (\d+)-(\d+) of (\d+)"))
+            .nth(2)
+            .locator("button:nth-of-type(3)")
+        )
 
     def get_pagination_button(self) -> Locator:
         return self.page.get_by_role("button", name="Showing")
@@ -22,7 +25,7 @@ class ExperimentItemsPage:
 
     def get_id_of_nth_experiment_item(self, n: int):
         row = self.page.locator("tr").nth(n + 1)
-        cell = row.locator("td").first
+        cell = row.locator("td").nth(1)
         cell.hover()
         cell.get_by_role("button").nth(1).click()
         id = self.page.evaluate("navigator.clipboard.readText()")
@@ -32,7 +35,7 @@ class ExperimentItemsPage:
         ids = []
         rows = self.page.locator("tr").all()
         for row_index, row in enumerate(rows[2:]):
-            cell = row.locator("td").first
+            cell = row.locator("td").nth(1)
             cell.hover()
             cell.get_by_role("button").nth(1).click()
             id = self.page.evaluate("navigator.clipboard.readText()")

@@ -1,6 +1,5 @@
 package com.comet.opik.domain;
 
-import com.comet.opik.api.Page;
 import com.comet.opik.api.ProviderApiKey;
 import com.comet.opik.api.ProviderApiKeyUpdate;
 import com.comet.opik.api.error.EntityAlreadyExistsException;
@@ -30,7 +29,7 @@ public interface LlmProviderApiKeyService {
 
     ProviderApiKey find(UUID id, String workspaceId);
 
-    Page<ProviderApiKey> find(String workspaceId);
+    ProviderApiKey.ProviderApiKeyPage find(String workspaceId);
 
     ProviderApiKey saveApiKey(ProviderApiKey providerApiKey, String userName, String workspaceId);
 
@@ -51,19 +50,16 @@ class LlmProviderApiKeyServiceImpl implements LlmProviderApiKeyService {
     @Override
     public ProviderApiKey find(@NonNull UUID id, @NonNull String workspaceId) {
 
-        ProviderApiKey providerApiKey = template.inTransaction(READ_ONLY, handle -> {
+        return template.inTransaction(READ_ONLY, handle -> {
 
             var repository = handle.attach(LlmProviderApiKeyDAO.class);
 
             return repository.fetch(id, workspaceId).orElseThrow(this::createNotFoundError);
         });
-
-        return providerApiKey.toBuilder()
-                .build();
     }
 
     @Override
-    public Page<ProviderApiKey> find(@NonNull String workspaceId) {
+    public ProviderApiKey.ProviderApiKeyPage find(@NonNull String workspaceId) {
         List<ProviderApiKey> providerApiKeys = template.inTransaction(READ_ONLY, handle -> {
             var repository = handle.attach(LlmProviderApiKeyDAO.class);
             return repository.find(workspaceId);
@@ -122,8 +118,8 @@ class LlmProviderApiKeyServiceImpl implements LlmProviderApiKeyService {
 
             repository.update(providerApiKey.id(),
                     workspaceId,
-                    providerApiKeyUpdate.apiKey(),
-                    userName);
+                    userName,
+                    providerApiKeyUpdate);
 
             return null;
         });

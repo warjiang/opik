@@ -1,4 +1,5 @@
 import React from "react";
+import isFunction from "lodash/isFunction";
 import {
   Select,
   SelectContent,
@@ -6,9 +7,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import TooltipWrapper from "@/components/shared/TooltipWrapper/TooltipWrapper";
 import { cn } from "@/lib/utils";
 import { DropdownOption } from "@/types/shared";
-import isFunction from "lodash/isFunction";
 
 export type SelectBoxProps = {
   value: string;
@@ -20,6 +21,7 @@ export type SelectBoxProps = {
   disabled?: boolean;
   testId?: string;
   renderOption?: (option: DropdownOption<string>) => React.ReactNode;
+  renderTrigger?: (value: string) => React.ReactNode;
 };
 
 export const SelectBox = ({
@@ -31,6 +33,7 @@ export const SelectBox = ({
   placeholder = "Select value",
   disabled = false,
   renderOption,
+  renderTrigger,
   testId,
 }: SelectBoxProps) => {
   const variantClass =
@@ -45,7 +48,11 @@ export const SelectBox = ({
           className,
         )}
       >
-        <SelectValue placeholder={placeholder} data-testid={testId} />
+        {isFunction(renderTrigger) ? (
+          renderTrigger(value)
+        ) : (
+          <SelectValue placeholder={placeholder} data-testid={testId} />
+        )}
       </SelectTrigger>
       <SelectContent>
         {options.map((option) => {
@@ -53,12 +60,34 @@ export const SelectBox = ({
             return renderOption(option);
           }
 
-          return (
-            <SelectItem key={option.value} value={option.value}>
+          const item = (
+            <SelectItem
+              key={option.value}
+              value={option.value}
+              description={option.description}
+              disabled={option.disabled}
+            >
               {option.label}
             </SelectItem>
           );
+
+          if (option.tooltip) {
+            return (
+              <TooltipWrapper
+                key={`tooltip-${option.value}`}
+                content={option.tooltip}
+              >
+                <div>{item}</div>
+              </TooltipWrapper>
+            );
+          }
+
+          return item;
         })}
+
+        {!options.length && (
+          <div className="comet-boby-s p-2 text-light-slate">No items</div>
+        )}
       </SelectContent>
     </Select>
   );

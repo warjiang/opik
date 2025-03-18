@@ -1,4 +1,4 @@
-name: Documentation - Test cookbooks
+name: Docs - Test cookbooks
 on:
   workflow_dispatch:
     inputs:
@@ -30,8 +30,12 @@ jobs:
           - apps/opik-documentation/documentation/docs/cookbook/openai.ipynb
           - apps/opik-documentation/documentation/docs/cookbook/litellm.ipynb
           - apps/opik-documentation/documentation/docs/cookbook/ragas.ipynb
+          - apps/opik-documentation/documentation/docs/cookbook/dspy.ipynb
+          - apps/opik-documentation/documentation/docs/cookbook/crewai.ipynb
+          - apps/opik-documentation/documentation/docs/cookbook/instructor.ipynb
     env:
       NOTEBOOK_TO_TEST: ${{ matrix.notebooks }}
+      OPIK_SENTRY_ENABLE: False
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4

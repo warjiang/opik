@@ -21,6 +21,12 @@ class ScoreMethodMissingArguments(OpikException):
     pass
 
 
+class MetricComputationError(Exception):
+    """Exception raised when a metric cannot be computed."""
+
+    pass
+
+
 class PromptPlaceholdersDontMatchFormatArguments(OpikException):
     def __init__(self, prompt_placeholders: Set[str], format_arguments: Set[str]):
         self.prompt_placeholders = prompt_placeholders
@@ -39,4 +45,8 @@ class PromptPlaceholdersDontMatchFormatArguments(OpikException):
 
 
 class ExperimentNotFound(OpikException):
+    pass
+
+
+class DatasetNotFound(OpikException):
     pass

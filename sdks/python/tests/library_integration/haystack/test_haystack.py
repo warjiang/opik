@@ -47,7 +47,7 @@ def test_haystack__happyflow(
 
     opik_connector = OpikConnector("Chat example", project_name=project_name)
     pipe = Pipeline()
-    pipe.add_component("tracer", opik_connector)
+    pipe.add_component("tracer", opik_connector)  # not necessary to add
     pipe.add_component("prompt_builder", ChatPromptBuilder())
     pipe.add_component("llm", OpenAIChatGenerator(model="gpt-3.5-turbo"))
 
@@ -71,6 +71,10 @@ def test_haystack__happyflow(
 
     tracer.actual_tracer.flush()
 
+    # The tracer and prompt_builder components are not dependent on any other components
+    # so they will be executed first. The order of execution is alphabetical: prompt_builder first, then tracer.
+    # In fact, tracer may even be not added to the pipeline to generate opik spans/traces,
+    # because the tracing itself is being set up inside OpikConnector.__init__ call.
     EXPECTED_TRACE_TREE = TraceModel(
         id=ANY_BUT_NONE,
         name="Chat example",
@@ -89,7 +93,7 @@ def test_haystack__happyflow(
         spans=[
             SpanModel(
                 id=ANY_BUT_NONE,
-                name="tracer",
+                name="prompt_builder",
                 input=ANY_DICT,
                 output=ANY_DICT,
                 tags=ANY,
@@ -100,7 +104,7 @@ def test_haystack__happyflow(
             ),
             SpanModel(
                 id=ANY_BUT_NONE,
-                name="prompt_builder",
+                name="tracer",
                 input=ANY_DICT,
                 output=ANY_DICT,
                 tags=ANY,
@@ -124,6 +128,9 @@ def test_haystack__happyflow(
                     "prompt_tokens": ANY_BUT_NONE,
                     "completion_tokens": ANY_BUT_NONE,
                     "total_tokens": ANY_BUT_NONE,
+                    "original_usage.prompt_tokens": ANY_BUT_NONE,
+                    "original_usage.completion_tokens": ANY_BUT_NONE,
+                    "original_usage.total_tokens": ANY_BUT_NONE,
                 },
                 model=ANY_STRING(startswith="gpt-3.5-turbo"),
             ),

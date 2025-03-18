@@ -65,7 +65,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.find_experiments()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -103,6 +106,9 @@ class ExperimentsClient:
         name: typing.Optional[str] = OMIT,
         metadata: typing.Optional[JsonNodeWrite] = OMIT,
         prompt_version: typing.Optional[PromptVersionLinkWrite] = OMIT,
+        prompt_versions: typing.Optional[
+            typing.Sequence[PromptVersionLinkWrite]
+        ] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -120,6 +126,8 @@ class ExperimentsClient:
 
         prompt_version : typing.Optional[PromptVersionLinkWrite]
 
+        prompt_versions : typing.Optional[typing.Sequence[PromptVersionLinkWrite]]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -131,7 +139,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.create_experiment(
             dataset_name="dataset_name",
         )
@@ -147,6 +158,11 @@ class ExperimentsClient:
                 "prompt_version": convert_and_respect_annotation_metadata(
                     object_=prompt_version,
                     annotation=PromptVersionLinkWrite,
+                    direction="write",
+                ),
+                "prompt_versions": convert_and_respect_annotation_metadata(
+                    object_=prompt_versions,
+                    annotation=typing.Sequence[PromptVersionLinkWrite],
                     direction="write",
                 ),
             },
@@ -188,7 +204,10 @@ class ExperimentsClient:
         --------
         from Opik import ExperimentItem, OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.create_experiment_items(
             experiment_items=[
                 ExperimentItem(
@@ -247,7 +266,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.delete_experiment_items(
             ids=["ids"],
         )
@@ -296,7 +318,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.delete_experiments_by_id(
             ids=["ids"],
         )
@@ -346,7 +371,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.find_feedback_score_names()
         """
         _response = self._client_wrapper.httpx_client.request(
@@ -393,7 +421,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.get_experiment_by_id(
             id="id",
         )
@@ -449,7 +480,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.get_experiment_by_name(
             name="name",
         )
@@ -512,7 +546,10 @@ class ExperimentsClient:
         --------
         from Opik import OpikApi
 
-        client = OpikApi()
+        client = OpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
         client.experiments.get_experiment_item_by_id(
             id="id",
         )
@@ -552,6 +589,7 @@ class ExperimentsClient:
         experiment_name: str,
         limit: typing.Optional[int] = OMIT,
         last_retrieved_id: typing.Optional[str] = OMIT,
+        truncate: typing.Optional[bool] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> typing.Iterator[bytes]:
         """
@@ -564,6 +602,9 @@ class ExperimentsClient:
         limit : typing.Optional[int]
 
         last_retrieved_id : typing.Optional[str]
+
+        truncate : typing.Optional[bool]
+            Truncate image included in either input, output or metadata
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration. You can pass in configuration such as `chunk_size`, and more to customize the request and response.
@@ -580,6 +621,7 @@ class ExperimentsClient:
                 "experiment_name": experiment_name,
                 "limit": limit,
                 "last_retrieved_id": last_retrieved_id,
+                "truncate": truncate,
             },
             headers={
                 "content-type": "application/json",
@@ -650,7 +692,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -694,6 +739,9 @@ class AsyncExperimentsClient:
         name: typing.Optional[str] = OMIT,
         metadata: typing.Optional[JsonNodeWrite] = OMIT,
         prompt_version: typing.Optional[PromptVersionLinkWrite] = OMIT,
+        prompt_versions: typing.Optional[
+            typing.Sequence[PromptVersionLinkWrite]
+        ] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> None:
         """
@@ -711,6 +759,8 @@ class AsyncExperimentsClient:
 
         prompt_version : typing.Optional[PromptVersionLinkWrite]
 
+        prompt_versions : typing.Optional[typing.Sequence[PromptVersionLinkWrite]]
+
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration.
 
@@ -724,7 +774,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -746,6 +799,11 @@ class AsyncExperimentsClient:
                 "prompt_version": convert_and_respect_annotation_metadata(
                     object_=prompt_version,
                     annotation=PromptVersionLinkWrite,
+                    direction="write",
+                ),
+                "prompt_versions": convert_and_respect_annotation_metadata(
+                    object_=prompt_versions,
+                    annotation=typing.Sequence[PromptVersionLinkWrite],
                     direction="write",
                 ),
             },
@@ -789,7 +847,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi, ExperimentItem
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -856,7 +917,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -913,7 +977,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -971,7 +1038,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1026,7 +1096,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1090,7 +1163,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1161,7 +1237,10 @@ class AsyncExperimentsClient:
 
         from Opik import AsyncOpikApi
 
-        client = AsyncOpikApi()
+        client = AsyncOpikApi(
+            api_key="YOUR_API_KEY",
+            workspace_name="YOUR_WORKSPACE_NAME",
+        )
 
 
         async def main() -> None:
@@ -1207,6 +1286,7 @@ class AsyncExperimentsClient:
         experiment_name: str,
         limit: typing.Optional[int] = OMIT,
         last_retrieved_id: typing.Optional[str] = OMIT,
+        truncate: typing.Optional[bool] = OMIT,
         request_options: typing.Optional[RequestOptions] = None,
     ) -> typing.AsyncIterator[bytes]:
         """
@@ -1219,6 +1299,9 @@ class AsyncExperimentsClient:
         limit : typing.Optional[int]
 
         last_retrieved_id : typing.Optional[str]
+
+        truncate : typing.Optional[bool]
+            Truncate image included in either input, output or metadata
 
         request_options : typing.Optional[RequestOptions]
             Request-specific configuration. You can pass in configuration such as `chunk_size`, and more to customize the request and response.
@@ -1235,6 +1318,7 @@ class AsyncExperimentsClient:
                 "experiment_name": experiment_name,
                 "limit": limit,
                 "last_retrieved_id": last_retrieved_id,
+                "truncate": truncate,
             },
             headers={
                 "content-type": "application/json",

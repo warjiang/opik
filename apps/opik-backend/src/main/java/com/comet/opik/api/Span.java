@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.fasterxml.jackson.databind.annotation.JsonNaming;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -51,18 +52,21 @@ public record Span(
         @JsonView({Span.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) String lastUpdatedBy,
         @JsonView({
                 Span.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) List<FeedbackScore> feedbackScores,
-        @JsonView({
-                Span.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) BigDecimal totalEstimatedCost,
+        @JsonView({Span.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY) List<Comment> comments,
+        @JsonView({Span.View.Public.class, Span.View.Write.class}) @DecimalMin("0.0") BigDecimal totalEstimatedCost,
+        String totalEstimatedCostVersion,
         @JsonView({
                 Span.View.Public.class}) @Schema(accessMode = Schema.AccessMode.READ_ONLY, description = "Duration in milliseconds as a decimal number to support sub-millisecond precision") Double duration){
 
+    @Builder(toBuilder = true)
     public record SpanPage(
             @JsonView(Span.View.Public.class) int page,
             @JsonView(Span.View.Public.class) int size,
             @JsonView(Span.View.Public.class) long total,
-            @JsonView(Span.View.Public.class) List<Span> content) implements com.comet.opik.api.Page<Span> {
+            @JsonView(Span.View.Public.class) List<Span> content,
+            @JsonView(Span.View.Public.class) List<String> sortableBy) implements com.comet.opik.api.Page<Span> {
         public static SpanPage empty(int page) {
-            return new SpanPage(page, 0, 0, List.of());
+            return new SpanPage(page, 0, 0, List.of(), List.of());
         }
     }
 
