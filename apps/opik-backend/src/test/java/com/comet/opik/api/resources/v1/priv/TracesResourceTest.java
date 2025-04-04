@@ -4512,6 +4512,50 @@ class TracesResourceTest {
                             .field(SortableFields.THREAD_ID).direction(Direction.DESC).build()));
         }
 
+        @ParameterizedTest
+        @MethodSource("getTracesByProject__whenSortingByValidFields__thenReturnTracesSorted")
+        void whenSortingByValidFields__thenReturnStatsSorted(Comparator<Trace> comparator, SortingField sorting) {
+            var workspaceName = RandomStringUtils.secure().nextAlphanumeric(10);
+            var workspaceId = UUID.randomUUID().toString();
+            var apiKey = UUID.randomUUID().toString();
+
+            mockTargetWorkspace(apiKey, workspaceName, workspaceId);
+
+            var projectName = RandomStringUtils.secure().nextAlphanumeric(10);
+
+            var traces = PodamFactoryUtils.manufacturePojoList(factory, Trace.class)
+                    .stream()
+                    .map(trace -> trace.toBuilder()
+                            .projectId(null)
+                            .projectName(projectName)
+                            .usage(null)
+                            .feedbackScores(null)
+                            .endTime(trace.startTime().plus(randomNumber(), ChronoUnit.MILLIS))
+                            .comments(null)
+                            .build())
+                    .map(trace -> trace.toBuilder()
+                            .duration(trace.startTime().until(trace.endTime(), ChronoUnit.MICROS) / 1000.0)
+                            .build())
+                    .collect(Collectors.toCollection(ArrayList::new));
+
+            traceResourceClient.batchCreateTraces(traces, apiKey, workspaceName);
+
+            var expectedTraces = traces.stream()
+                    .sorted(comparator)
+                    .toList();
+
+            TraceStatsAssertion traceStatsAssertion = new TraceStatsAssertion(traceResourceClient);
+
+            var testArgs = traceStatsAssertion.transformTestParams(expectedTraces, expectedTraces, List.of());
+
+            Map<String, String> queryParams = Map.of(
+                    "sorting", URLEncoder.encode(JsonUtils.writeValueAsString(List.of(sorting)), StandardCharsets.UTF_8)
+            );
+
+            traceStatsAssertion.assertTest(
+                    projectName, null, apiKey, workspaceName, testArgs.expected(), testArgs.unexpected(), testArgs.all(), List.of(), queryParams);
+        }
+
         @Test
         void getTracesByProject__whenSortingByInvalidField__thenReturn400() {
             var field = RandomStringUtils.secure().nextAlphanumeric(10);

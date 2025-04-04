@@ -7,13 +7,14 @@ if [[ $# -ne 2 ]]; then
 fi
 
 # Configuration
-HOST="localhost"
+HOST="clickhouseliya.dev.comet.com"
 PORT="9000"
 USER="opik"
 PASS="opik"
-DB="opik"
-CONCURRENCY=1
-ITERATIONS=10
+DB="opik_prod"
+CONCURRENCY=2
+ITERATIONS=20
+QUERY_LOOKBACK_MINUTES=2
 
 run_benchmark() {
   local file="$1"
@@ -21,7 +22,28 @@ run_benchmark() {
 
   echo "▶ Running benchmark for $label..."
 
-  # Capture stderr (clickhouse-benchmark outputs to stderr)
+  # Drop ClickHouse caches before each run (cold cache)
+  clickhouse-client -q "SYSTEM DROP MARK CACHE" \
+    --host "$HOST" \
+    --port "$PORT" \
+    --user "$USER" \
+    --password "$PASS" \
+    --database "$DB"
+
+  clickhouse-client -q "SYSTEM DROP UNCOMPRESSED CACHE"  \
+    --host "$HOST" \
+    --port "$PORT" \
+    --user "$USER" \
+    --password "$PASS" \
+    --database "$DB"
+
+  # Capture SQL fingerprint for memory lookup
+  query_text=$(cat "$file" | sed 's/^[[:space:]]*//' | tr -s ' ')
+  query_tag=$(head -n1 "$file" | sed 's/^--//')
+
+  echo "Query fingerprint: $query_tag"
+
+  # Run the benchmark
   local output
   output=$(clickhouse-benchmark \
     --host "$HOST" \
@@ -31,24 +53,54 @@ run_benchmark() {
     --database "$DB" \
     --concurrency "$CONCURRENCY" \
     --iterations "$ITERATIONS" \
-    --query="$(cat "$file")" 2>&1)
+    --delay=0 \
+    --enable_filesystem_cache=0 \
+    --query="$query_text" 2>&1)
 
   echo "$output" > "${label}_benchmark.log"
 
-  # Extract the LAST summary line only
-  local summary=$(echo "$output" | grep -E 'queries: .*QPS:' | tail -n1)
+  # Extract summary line
+  local summary
+  summary=$(echo "$output" | grep -E 'queries: .*QPS:' | tail -n1)
 
-  # Extract the values
-  local qps=$(echo "$summary" | grep -oE 'QPS: [0-9.]+' | head -n1 | awk '{print $2}')
-  local rps=$(echo "$summary" | grep -oE 'RPS: [0-9.]+' | head -n1 | awk '{print $2}')
-  local p95=$(echo "$output" | grep -E "^\s*95%" | tail -n1 | awk '{print $2}')
+  # Extract metrics
+  local qps rps p90
+  qps=$(echo "$summary" | grep -oE 'QPS: [0-9.]+' | head -n1 | awk '{print $2}')
+  rps=$(echo "$summary" | grep -oE 'RPS: [0-9.]+' | head -n1 | awk '{print $2}')
+  p90=$(echo "$output" | grep -E "^\s*90%" | tail -n1 | awk '{print $2}')
 
-  echo "$label: QPS=$qps, RPS=$rps, p95=${p95}s"
+  # Wait 1 second for ClickHouse to flush query_log
+  sleep 1
+
+  # Query average and peak memory usage for the query
+
+  local mem_avg mem_peak
+  read -r mem_avg mem_peak <<< $(clickhouse-client \
+    --host "$HOST" \
+    --port "$PORT" \
+    --user "$USER" \
+    --password "$PASS" \
+    --database "$DB" \
+    --query "
+      SELECT
+        round(avg(memory_usage) / 1048576, 1),
+        round(max(memory_usage) / 1048576, 1)
+      FROM system.query_log
+      WHERE type = 'QueryFinish'
+        AND event_time > now() - INTERVAL $QUERY_LOOKBACK_MINUTES minute
+        AND positionCaseInsensitive(query, '$query_tag') > 0
+      LIMIT 1;
+    "
+  )
+
+  echo "$label: QPS=$qps, RPS=$rps, p90=${p90}s, Mem(avg)=${mem_avg} MiB, Mem(peak)=${mem_peak} MiB"
   echo ""
 
   BENCH_QPS="$qps"
   BENCH_RPS="$rps"
-  BENCH_P95="$p95"
+  BENCH_P90="$p90"
+  BENCH_MEM_AVG="$mem_avg"
+  BENCH_MEM_PEAK="$mem_peak"
 }
 
 percent_diff() {
@@ -59,26 +111,58 @@ percent_diff() {
 }
 
 # Run benchmarks
-run_benchmark "$1" "QueryA"
-A_QPS=$BENCH_QPS
-A_RPS=$BENCH_RPS
-A_P95=$BENCH_P95
+if (( RANDOM % 2 )); then
+  run_benchmark "$1" "QueryA"
+  A_QPS=$BENCH_QPS
+  A_RPS=$BENCH_RPS
+  A_P90=$BENCH_P90
+  A_MEM_AVG=$BENCH_MEM_AVG
+  A_MEM_PEAK=$BENCH_MEM_PEAK
 
-run_benchmark "$2" "QueryB"
-B_QPS=$BENCH_QPS
-B_RPS=$BENCH_RPS
-B_P95=$BENCH_P95
+  run_benchmark "$2" "QueryB"
+  B_QPS=$BENCH_QPS
+  B_RPS=$BENCH_RPS
+  B_P90=$BENCH_P90
+  B_MEM_AVG=$BENCH_MEM_AVG
+  B_MEM_PEAK=$BENCH_MEM_PEAK
+else
+  run_benchmark "$2" "QueryB"
+  B_QPS=$BENCH_QPS
+  B_RPS=$BENCH_RPS
+  B_P90=$BENCH_P90
+  B_MEM_AVG=$BENCH_MEM_AVG
+  B_MEM_PEAK=$BENCH_MEM_PEAK
+
+  run_benchmark "$1" "QueryA"
+  A_QPS=$BENCH_QPS
+  A_RPS=$BENCH_RPS
+  A_P90=$BENCH_P90
+  A_MEM_AVG=$BENCH_MEM_AVG
+  A_MEM_PEAK=$BENCH_MEM_PEAK
+fi
+
 
 # Final comparison
 echo "📊 Comparison:"
-echo "QPS diff  : $(percent_diff "$A_QPS" "$B_QPS")% (A vs B)"
-echo "RPS diff  : $(percent_diff "$A_RPS" "$B_RPS")% (A vs B)"
-echo "p95 diff  : $(percent_diff "$B_P95" "$A_P95")% faster (A vs B)"
+echo "QPS diff    : $(percent_diff "$A_QPS" "$B_QPS")% (A vs B)"
+echo "RPS diff    : $(percent_diff "$A_RPS" "$B_RPS")% (A vs B)"
+echo "p95 diff    : $(percent_diff "$B_P90" "$A_P90")% faster (A vs B)"
+echo "Mem(avg)    : $(percent_diff "$B_MEM_AVG" "$A_MEM_AVG")% more memory used (B vs A)"
+echo "Mem(peak)   : $(percent_diff "$B_MEM_PEAK" "$A_MEM_PEAK")% more memory used (B vs A)"
 
-# Clear decision
+
 echo ""
+
+# Performance winner
 if [[ $(echo "$A_QPS > $B_QPS" | bc -l) -eq 1 ]]; then
-  echo "✅ QueryA is faster based on QPS, RPS, and lower latency."
+  echo "✅ QueryA is faster based on QPS, RPS, and latency."
 else
-  echo "✅ QueryB is faster based on QPS, RPS, and lower latency."
+  echo "✅ QueryB is faster based on QPS, RPS, and latency."
+fi
+
+# Memory efficiency
+if [[ $(echo "$A_MEM_AVG < $B_MEM_AVG" | bc -l) -eq 1 ]]; then
+  echo "✅ QueryA used less average memory."
+else
+  echo "✅ QueryB used less average memory."
 fi

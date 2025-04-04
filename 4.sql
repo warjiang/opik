@@ -1,4 +1,5 @@
-﻿WITH comments_final AS (
+﻿--4.sql
+WITH comments_final AS (
   SELECT
        id AS comment_id,
        text,
@@ -8,8 +9,8 @@
        last_updated_by AS comment_last_updated_by,
        entity_id
   FROM comments
-  WHERE workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-  AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+  WHERE workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+  AND project_id = '0194d02b-d735-7b34-8b7e-3b8f7e287e78'
   ORDER BY (workspace_id, project_id, entity_id, id) DESC, last_updated_at DESC
   LIMIT 1 BY id
 ), feedback_scores_agg AS (
@@ -35,8 +36,8 @@
             *
         FROM feedback_scores
         WHERE entity_type = 'span'
-        AND workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-		AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+        AND workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+	    AND project_id = '0194d02b-d735-7b34-8b7e-3b8f7e287e78'
         ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC
         LIMIT 1 BY entity_id, name
     )
@@ -80,8 +81,8 @@ FROM (
           fsa.feedback_scores as feedback_scores
     FROM spans
     LEFT JOIN feedback_scores_agg AS fsa ON fsa.entity_id = spans.id
-    WHERE workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-	AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+    WHERE workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+	AND project_id = '0194d02b-d735-7b34-8b7e-3b8f7e287e78'
     ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
     LIMIT 1 BY id
     LIMIT 100 OFFSET 0
@@ -89,4 +90,7 @@ FROM (
 LEFT JOIN comments_final AS c ON s.id = c.entity_id
 GROUP BY
   s.*
-ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC ;
+ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC
+SETTINGS 
+		  use_query_cache = 0,
+		  use_uncompressed_cache=0;

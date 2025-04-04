@@ -1,10 +1,11 @@
-﻿WITH feedback_scores_agg AS ( 
+﻿--2.sql
+WITH feedback_scores_agg AS ( 
 	SELECT entity_id, mapFromArrays( groupArray(name), groupArray(value) ) as feedback_scores, 
 			groupArray(tuple( name, category_name, value, reason, source, created_at, last_updated_at, created_by, last_updated_by )) as feedback_scores_list 
 			FROM ( SELECT * FROM feedback_scores 
 			WHERE entity_type = 'trace' 
-			AND workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-			AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+			AND workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+			AND project_id = '019479e2-61ef-7c98-836e-f4cec3ab69e8'
 			ORDER BY (workspace_id, project_id, entity_type, entity_id, name) DESC, last_updated_at DESC 
 			LIMIT 1 BY entity_id, name ) 
 	GROUP BY workspace_id, project_id, entity_id )
@@ -16,8 +17,8 @@
 		SELECT 
 			workspace_id, project_id, trace_id, id, usage, total_estimated_cost 
 		FROM spans
-		WHERE workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-		AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+		WHERE workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+		AND project_id = '019479e2-61ef-7c98-836e-f4cec3ab69e8'
 		ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC 
 		LIMIT 1 BY id 
 	) GROUP BY workspace_id, project_id, trace_id )
@@ -25,8 +26,8 @@
 	SELECT entity_id, groupArray(tuple(id, text, created_at, last_updated_at, created_by, last_updated_by)) AS comments_array 
 	FROM ( 
 		SELECT id, text, created_at, last_updated_at, created_by, last_updated_by, entity_id, workspace_id, project_id FROM comments
-		WHERE workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-		AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+		WHERE workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+		AND project_id = '019479e2-61ef-7c98-836e-f4cec3ab69e8'
 		ORDER BY (workspace_id, project_id, entity_id, id) DESC, last_updated_at DESC 
 		LIMIT 1 BY id 
 	) GROUP BY workspace_id, project_id, entity_id ) 
@@ -60,8 +61,8 @@ FROM (
 		fsagg.feedback_scores as feedback_scores 
 	FROM traces t 
 	LEFT JOIN feedback_scores_agg fsagg ON fsagg.entity_id = t.id
-	WHERE workspace_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
-	AND project_id = '0190babc-62a0-71d2-832a-0feffa4676eb' 
+	WHERE workspace_id = 'aef3c10f-1516-4cd0-b7d6-92213d4cfebb'
+	AND project_id = '019479e2-61ef-7c98-836e-f4cec3ab69e8'
 	ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC 
 	LIMIT 1 BY id 
 	LIMIT 100 OFFSET 0 
@@ -70,4 +71,6 @@ LEFT JOIN spans_agg AS s ON t.id = s.trace_id
 LEFT JOIN comments_agg AS c ON t.id = c.entity_id 
 GROUP BY t.* 
 ORDER BY (workspace_id, project_id, id) DESC, last_updated_at DESC 
-;
+SETTINGS 
+		  use_query_cache = 0,
+		  use_uncompressed_cache=0;
